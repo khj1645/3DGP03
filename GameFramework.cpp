@@ -1,0 +1,794 @@
+﻿//-----------------------------------------------------------------------------
+// File: CGameFramework.cpp
+//-----------------------------------------------------------------------------
+
+#include "stdafx.h"
+#include "GameFramework.h"
+#include "Shader.h"
+#include "d3dx12.h" // Added for CD3DX12_RESOURCE_BARRIER helper
+
+CGameFramework::CGameFramework()
+{
+	m_pdxgiFactory = NULL;
+	m_pdxgiSwapChain = NULL;
+	m_pd3dDevice = NULL;
+
+	for (int i = 0; i < m_nSwapChainBuffers; i++) m_ppd3dSwapChainBackBuffers[i] = NULL;
+	m_nSwapChainBufferIndex = 0;
+
+	m_pd3dCommandAllocator = NULL;
+	m_pd3dCommandQueue = NULL;
+	m_pd3dCommandList = NULL;
+
+	m_pd3dRtvDescriptorHeap = NULL;
+	m_pd3dDsvDescriptorHeap = NULL;
+
+	gnRtvDescriptorIncrementSize = 0;
+	gnDsvDescriptorIncrementSize = 0;
+
+	m_hFenceEvent = NULL;
+	m_pd3dFence = NULL;
+	for (int i = 0; i < m_nSwapChainBuffers; i++) m_nFenceValues[i] = 0;
+
+	m_nWndClientWidth = FRAME_BUFFER_WIDTH;
+	m_nWndClientHeight = FRAME_BUFFER_HEIGHT;
+
+	m_pScene = NULL;
+	m_pPlayer = NULL;
+
+	m_pSceneTexture = NULL;
+	m_pBlurTexture = NULL;
+
+	_tcscpy_s(m_pszFrameRate, _T("LabProject ("));
+}
+
+CGameFramework::~CGameFramework()
+{
+}
+
+bool CGameFramework::OnCreate(HINSTANCE hInstance, HWND hMainWnd)
+{
+	m_hInstance = hInstance;
+	m_hWnd = hMainWnd;
+
+	CreateDirect3DDevice();
+	CreateCommandQueueAndList();
+	CreateRtvAndDsvDescriptorHeaps();
+	CreateSwapChain();
+	CreateDepthStencilView();
+
+	CoInitialize(NULL);
+
+	BuildObjects();
+
+	return(true);
+}
+
+void CGameFramework::CreateSwapChain()
+{
+	RECT rcClient;
+	::GetClientRect(m_hWnd, &rcClient);
+	m_nWndClientWidth = rcClient.right - rcClient.left;
+	m_nWndClientHeight = rcClient.bottom - rcClient.top;
+
+#ifdef _WITH_CREATE_SWAPCHAIN_FOR_HWND
+	DXGI_SWAP_CHAIN_DESC1 dxgiSwapChainDesc;
+	::ZeroMemory(&dxgiSwapChainDesc, sizeof(DXGI_SWAP_CHAIN_DESC1));
+	dxgiSwapChainDesc.Width = m_nWndClientWidth;
+	dxgiSwapChainDesc.Height = m_nWndClientHeight;
+	dxgiSwapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	dxgiSwapChainDesc.SampleDesc.Count = (m_bMsaa4xEnable) ? 4 : 1;
+	dxgiSwapChainDesc.SampleDesc.Quality = (m_bMsaa4xEnable) ? (m_nMsaa4xQualityLevels - 1) : 0;
+	dxgiSwapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_
+		
+		
+		
+		;
+	dxgiSwapChainDesc.BufferCount = m_nSwapChainBuffers;
+	dxgiSwapChainDesc.Scaling = DXGI_SCALING_NONE;
+	dxgiSwapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	dxgiSwapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+	dxgiSwapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+
+	DXGI_SWAP_CHAIN_FULLSCREEN_DESC dxgiSwapChainFullScreenDesc;
+	::ZeroMemory(&dxgiSwapChainFullScreenDesc, sizeof(DXGI_SWAP_CHAIN_FULLSCREEN_DESC));
+	dxgiSwapChainFullScreenDesc.RefreshRate.Numerator = 60;
+	dxgiSwapChainFullScreenDesc.RefreshRate.Denominator = 1;
+	dxgiSwapChainFullScreenDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
+	dxgiSwapChainFullScreenDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
+	dxgiSwapChainFullScreenDesc.Windowed = TRUE;
+
+	HRESULT hResult = m_pdxgiFactory->CreateSwapChainForHwnd(m_pd3dCommandQueue, m_hWnd, &dxgiSwapChainDesc, &dxgiSwapChainFullScreenDesc, NULL, (IDXGISwapChain1 **)&m_pdxgiSwapChain);
+#else
+	DXGI_SWAP_CHAIN_DESC dxgiSwapChainDesc;
+	::ZeroMemory(&dxgiSwapChainDesc, sizeof(dxgiSwapChainDesc));
+	dxgiSwapChainDesc.BufferCount = m_nSwapChainBuffers;
+	dxgiSwapChainDesc.BufferDesc.Width = m_nWndClientWidth;
+	dxgiSwapChainDesc.BufferDesc.Height = m_nWndClientHeight;
+	dxgiSwapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	dxgiSwapChainDesc.BufferDesc.RefreshRate.Numerator = 60;
+	dxgiSwapChainDesc.BufferDesc.RefreshRate.Denominator = 1;
+	dxgiSwapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	dxgiSwapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	dxgiSwapChainDesc.OutputWindow = m_hWnd;
+	dxgiSwapChainDesc.SampleDesc.Count = (m_bMsaa4xEnable) ? 4 : 1;
+	dxgiSwapChainDesc.SampleDesc.Quality = (m_bMsaa4xEnable) ? (m_nMsaa4xQualityLevels - 1) : 0;
+	dxgiSwapChainDesc.Windowed = TRUE;
+	dxgiSwapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+
+	HRESULT hResult = m_pdxgiFactory->CreateSwapChain(m_pd3dCommandQueue, &dxgiSwapChainDesc, (IDXGISwapChain **)&m_pdxgiSwapChain);
+#endif
+	m_nSwapChainBufferIndex = m_pdxgiSwapChain->GetCurrentBackBufferIndex();
+
+	hResult = m_pdxgiFactory->MakeWindowAssociation(m_hWnd, DXGI_MWA_NO_ALT_ENTER);
+
+#ifndef _WITH_SWAPCHAIN_FULLSCREEN_STATE
+	CreateRenderTargetViews();
+#endif
+}
+
+void CGameFramework::CreateDirect3DDevice()
+{
+	HRESULT hResult;
+
+	UINT nDXGIFactoryFlags = 0;
+#if defined(_DEBUG)
+	ID3D12Debug *pd3dDebugController = NULL;
+	hResult = D3D12GetDebugInterface(__uuidof(ID3D12Debug), (void **)&pd3dDebugController);
+	if (pd3dDebugController)
+	{
+		pd3dDebugController->EnableDebugLayer();
+		pd3dDebugController->Release();
+	}
+	nDXGIFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+#endif
+
+	hResult = ::CreateDXGIFactory2(nDXGIFactoryFlags, __uuidof(IDXGIFactory4), (void **)&m_pdxgiFactory);
+
+	IDXGIAdapter1 *pd3dAdapter = NULL;
+
+	for (UINT i = 0; DXGI_ERROR_NOT_FOUND != m_pdxgiFactory->EnumAdapters1(i, &pd3dAdapter); i++)
+	{
+		DXGI_ADAPTER_DESC1 dxgiAdapterDesc;
+		pd3dAdapter->GetDesc1(&dxgiAdapterDesc);
+		if (dxgiAdapterDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
+		if (SUCCEEDED(D3D12CreateDevice(pd3dAdapter, D3D_FEATURE_LEVEL_12_0, _uuidof(ID3D12Device), (void **)&m_pd3dDevice))) break;
+	}
+
+	if (!pd3dAdapter)
+	{
+		m_pdxgiFactory->EnumWarpAdapter(_uuidof(IDXGIFactory4), (void **)&pd3dAdapter);
+		hResult = D3D12CreateDevice(pd3dAdapter, D3D_FEATURE_LEVEL_12_0, _uuidof(ID3D12Device), (void **)&m_pd3dDevice);
+	}
+
+	::gnCbvSrvDescriptorIncrementSize = m_pd3dDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	::gnRtvDescriptorIncrementSize = m_pd3dDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	::gnDsvDescriptorIncrementSize = m_pd3dDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+
+	D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS d3dMsaaQualityLevels;
+	d3dMsaaQualityLevels.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	d3dMsaaQualityLevels.SampleCount = 4;
+	d3dMsaaQualityLevels.Flags = D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE;
+	d3dMsaaQualityLevels.NumQualityLevels = 0;
+	hResult = m_pd3dDevice->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS, &d3dMsaaQualityLevels, sizeof(D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS));
+	m_nMsaa4xQualityLevels = d3dMsaaQualityLevels.NumQualityLevels;
+	m_bMsaa4xEnable = (m_nMsaa4xQualityLevels > 1) ? true : false;
+
+	hResult = m_pd3dDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void **)&m_pd3dFence);
+	for (UINT i = 0; i < m_nSwapChainBuffers; i++) m_nFenceValues[i] = 0;
+
+	m_hFenceEvent = ::CreateEvent(NULL, FALSE, FALSE, NULL);
+
+	if (pd3dAdapter) pd3dAdapter->Release();
+}
+
+void CGameFramework::CreateCommandQueueAndList()
+{
+	HRESULT hResult;
+
+	D3D12_COMMAND_QUEUE_DESC d3dCommandQueueDesc;
+	::ZeroMemory(&d3dCommandQueueDesc, sizeof(D3D12_COMMAND_QUEUE_DESC));
+	d3dCommandQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	d3dCommandQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	hResult = m_pd3dDevice->CreateCommandQueue(&d3dCommandQueueDesc, _uuidof(ID3D12CommandQueue), (void **)&m_pd3dCommandQueue);
+
+	hResult = m_pd3dDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), (void **)&m_pd3dCommandAllocator);
+
+	hResult = m_pd3dDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_pd3dCommandAllocator, NULL, __uuidof(ID3D12GraphicsCommandList), (void **)&m_pd3dCommandList);
+	hResult = m_pd3dCommandList->Close();
+}
+
+void CGameFramework::CreateRtvAndDsvDescriptorHeaps()
+{
+	D3D12_DESCRIPTOR_HEAP_DESC d3dDescriptorHeapDesc;
+	::ZeroMemory(&d3dDescriptorHeapDesc, sizeof(D3D12_DESCRIPTOR_HEAP_DESC));
+	d3dDescriptorHeapDesc.NumDescriptors = m_nSwapChainBuffers + 1;
+	d3dDescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+	d3dDescriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	d3dDescriptorHeapDesc.NodeMask = 0;
+	HRESULT hResult = m_pd3dDevice->CreateDescriptorHeap(&d3dDescriptorHeapDesc, __uuidof(ID3D12DescriptorHeap), (void **)&m_pd3dRtvDescriptorHeap);
+
+	d3dDescriptorHeapDesc.NumDescriptors = 1;
+	d3dDescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+	hResult = m_pd3dDevice->CreateDescriptorHeap(&d3dDescriptorHeapDesc, __uuidof(ID3D12DescriptorHeap), (void **)&m_pd3dDsvDescriptorHeap);
+}
+
+void CGameFramework::CreateRenderTargetViews()
+{
+	D3D12_CPU_DESCRIPTOR_HANDLE d3dRtvCPUDescriptorHandle = m_pd3dRtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	for (UINT i = 0; i < m_nSwapChainBuffers; i++)
+	{
+		m_pdxgiSwapChain->GetBuffer(i, __uuidof(ID3D12Resource), (void **)&m_ppd3dSwapChainBackBuffers[i]);
+		m_pd3dDevice->CreateRenderTargetView(m_ppd3dSwapChainBackBuffers[i], NULL, d3dRtvCPUDescriptorHandle);
+		d3dRtvCPUDescriptorHandle.ptr += gnRtvDescriptorIncrementSize;
+	}
+}
+
+void CGameFramework::CreateDepthStencilView()
+{
+	D3D12_RESOURCE_DESC d3dResourceDesc;
+	d3dResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	d3dResourceDesc.Alignment = 0;
+	d3dResourceDesc.Width = m_nWndClientWidth;
+	d3dResourceDesc.Height = m_nWndClientHeight;
+	d3dResourceDesc.DepthOrArraySize = 1;
+	d3dResourceDesc.MipLevels = 1;
+	d3dResourceDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	d3dResourceDesc.SampleDesc.Count = (m_bMsaa4xEnable) ? 4 : 1;
+	d3dResourceDesc.SampleDesc.Quality = (m_bMsaa4xEnable) ? (m_nMsaa4xQualityLevels - 1) : 0;
+	d3dResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	d3dResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+	D3D12_HEAP_PROPERTIES d3dHeapProperties;
+	::ZeroMemory(&d3dHeapProperties, sizeof(D3D12_HEAP_PROPERTIES));
+	d3dHeapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+	d3dHeapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+	d3dHeapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+	d3dHeapProperties.CreationNodeMask = 1;
+	d3dHeapProperties.VisibleNodeMask = 1;
+
+	D3D12_CLEAR_VALUE d3dClearValue;
+	d3dClearValue.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	d3dClearValue.DepthStencil.Depth = 1.0f;
+	d3dClearValue.DepthStencil.Stencil = 0;
+
+	m_pd3dDevice->CreateCommittedResource(&d3dHeapProperties, D3D12_HEAP_FLAG_NONE, &d3dResourceDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &d3dClearValue, __uuidof(ID3D12Resource), (void **)&m_pd3dDepthStencilBuffer);
+
+	D3D12_DEPTH_STENCIL_VIEW_DESC d3dDepthStencilViewDesc;
+	::ZeroMemory(&d3dDepthStencilViewDesc, sizeof(D3D12_DEPTH_STENCIL_VIEW_DESC));
+	d3dDepthStencilViewDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	d3dDepthStencilViewDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+	d3dDepthStencilViewDesc.Flags = D3D12_DSV_FLAG_NONE;
+
+	D3D12_CPU_DESCRIPTOR_HANDLE d3dDsvCPUDescriptorHandle = m_pd3dDsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	m_pd3dDevice->CreateDepthStencilView(m_pd3dDepthStencilBuffer, &d3dDepthStencilViewDesc, d3dDsvCPUDescriptorHandle);
+}
+
+void CGameFramework::ChangeSwapChainState()
+{
+	WaitForGpuComplete();
+
+	BOOL bFullScreenState = FALSE;
+	m_pdxgiSwapChain->GetFullscreenState(&bFullScreenState, NULL);
+	m_pdxgiSwapChain->SetFullscreenState(!bFullScreenState, NULL);
+
+	DXGI_MODE_DESC dxgiTargetParameters;
+	dxgiTargetParameters.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	dxgiTargetParameters.Width = m_nWndClientWidth;
+	dxgiTargetParameters.Height = m_nWndClientHeight;
+	dxgiTargetParameters.RefreshRate.Numerator = 60;
+	dxgiTargetParameters.RefreshRate.Denominator = 1;
+	dxgiTargetParameters.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
+	dxgiTargetParameters.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
+	m_pdxgiSwapChain->ResizeTarget(&dxgiTargetParameters);
+
+	for (int i = 0; i < m_nSwapChainBuffers; i++) if (m_ppd3dSwapChainBackBuffers[i]) m_ppd3dSwapChainBackBuffers[i]->Release();
+
+	DXGI_SWAP_CHAIN_DESC dxgiSwapChainDesc;
+	m_pdxgiSwapChain->GetDesc(&dxgiSwapChainDesc);
+	m_pdxgiSwapChain->ResizeBuffers(m_nSwapChainBuffers, m_nWndClientWidth, m_nWndClientHeight, dxgiSwapChainDesc.BufferDesc.Format, dxgiSwapChainDesc.Flags);
+
+	m_nSwapChainBufferIndex = m_pdxgiSwapChain->GetCurrentBackBufferIndex();
+
+	CreateRenderTargetViews();
+}
+
+void CGameFramework::OnProcessingMouseMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam)
+{
+	if (m_pScene) m_pScene->OnProcessingMouseMessage(hWnd, nMessageID, wParam, lParam);
+	switch (nMessageID)
+	{
+		case WM_LBUTTONDOWN:
+		case WM_RBUTTONDOWN:
+			::SetCapture(hWnd);
+			::GetCursorPos(&m_ptOldCursorPos);
+			break;
+		case WM_LBUTTONUP:
+		case WM_RBUTTONUP:
+			::ReleaseCapture();
+			break;
+		case WM_MOUSEMOVE:
+			break;
+		default:
+			break;
+	}
+}
+
+void CGameFramework::OnProcessingKeyboardMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam)
+{
+	if (m_pScene) m_pScene->OnProcessingKeyboardMessage(hWnd, nMessageID, wParam, lParam);
+	switch (nMessageID)
+	{
+		case WM_KEYUP:
+			switch (wParam)
+			{
+				case VK_ESCAPE:
+					::PostQuitMessage(0);
+					break;
+				case VK_RETURN:
+					if (m_GameState == GameState::MainMenu) SetGameState(GameState::InGame);
+					break;
+				case VK_F1:
+				case VK_F2:
+				case VK_F3:
+					m_pCamera = m_pPlayer->ChangeCamera((DWORD)(wParam - VK_F1 + 1), m_GameTimer.GetTimeElapsed());
+					break;
+				case VK_F9:
+					ChangeSwapChainState();
+					break;
+				case VK_F6:
+					m_bDebugFrustumTight = !m_bDebugFrustumTight;
+					if (m_pCamera)
+					{
+						m_pCamera->GenerateProjectionMatrix(1.01f, 500.0f, ASPECT_RATIO, 60.0f);
+					}
+					break;
+				case VK_F5:
+					break;
+				default:
+					break;
+			}
+			break;
+		default:
+			break;
+	}
+}
+
+LRESULT CALLBACK CGameFramework::OnProcessingWindowMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam)
+{
+	switch (nMessageID)
+	{
+		case WM_ACTIVATE:
+		{
+			if (LOWORD(wParam) == WA_INACTIVE)
+				m_GameTimer.Stop();
+			else
+				m_GameTimer.Start();
+			break;
+		}
+		case WM_SIZE:
+			break;
+		case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_RBUTTONUP:
+        case WM_MOUSEMOVE:
+			OnProcessingMouseMessage(hWnd, nMessageID, wParam, lParam);
+            break;
+        case WM_KEYDOWN:
+        case WM_KEYUP:
+			OnProcessingKeyboardMessage(hWnd, nMessageID, wParam, lParam);
+			break;
+	}
+	return(0);
+}
+
+D3D12_HEAP_PROPERTIES CreateHeapProperties(D3D12_HEAP_TYPE d3dHeapType)
+{
+	D3D12_HEAP_PROPERTIES d3dHeapProperties;
+	::ZeroMemory(&d3dHeapProperties, sizeof(D3D12_HEAP_PROPERTIES));
+	d3dHeapProperties.Type = d3dHeapType;
+	d3dHeapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+	d3dHeapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+	d3dHeapProperties.CreationNodeMask = 1;
+	d3dHeapProperties.VisibleNodeMask = 1;
+	return(d3dHeapProperties);
+}
+
+void CGameFramework::OnDestroy()
+{
+    ReleaseObjects();
+
+	::CloseHandle(m_hFenceEvent);
+
+	if (m_pSceneTexture) m_pSceneTexture->Release();
+	if (m_pBlurTexture) m_pBlurTexture->Release();
+	if (m_pMotionBlurShader) m_pMotionBlurShader->Release();
+
+	if (m_pd3dDepthStencilBuffer) m_pd3dDepthStencilBuffer->Release();
+	if (m_pd3dDsvDescriptorHeap) m_pd3dDsvDescriptorHeap->Release();
+
+	for (int i = 0; i < m_nSwapChainBuffers; i++) if (m_ppd3dSwapChainBackBuffers[i]) m_ppd3dSwapChainBackBuffers[i]->Release();
+	if (m_pd3dRtvDescriptorHeap) m_pd3dRtvDescriptorHeap->Release();
+
+	if (m_pd3dCommandAllocator) m_pd3dCommandAllocator->Release();
+	if (m_pd3dCommandQueue) m_pd3dCommandQueue->Release();
+	if (m_pd3dCommandList) m_pd3dCommandList->Release();
+
+	if (m_pd3dFence) m_pd3dFence->Release();
+
+	m_pdxgiSwapChain->SetFullscreenState(FALSE, NULL);
+	if (m_pdxgiSwapChain) m_pdxgiSwapChain->Release();
+    if (m_pd3dDevice) m_pd3dDevice->Release();
+	if (m_pdxgiFactory) m_pdxgiFactory->Release();
+
+#if defined(_DEBUG)
+	IDXGIDebug1	*pdxgiDebug = NULL;
+	DXGIGetDebugInterface1(0, __uuidof(IDXGIDebug1), (void **)&pdxgiDebug);
+	HRESULT hResult = pdxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_DETAIL);
+	pdxgiDebug->Release();
+#endif
+}
+
+void CGameFramework::CreateSceneTexture()
+{
+	D3D12_RESOURCE_DESC d3dResourceDesc;
+	d3dResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	d3dResourceDesc.Alignment = 0;
+	d3dResourceDesc.Width = m_nWndClientWidth;
+	d3dResourceDesc.Height = m_nWndClientHeight;
+	d3dResourceDesc.DepthOrArraySize = 1;
+	d3dResourceDesc.MipLevels = 1;
+	d3dResourceDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	d3dResourceDesc.SampleDesc.Count = 1;
+	d3dResourceDesc.SampleDesc.Quality = 0;
+	d3dResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	d3dResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+	D3D12_HEAP_PROPERTIES d3dHeapProperties = CreateHeapProperties(D3D12_HEAP_TYPE_DEFAULT);
+	
+	D3D12_CLEAR_VALUE d3dClearValue;
+	d3dClearValue.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	float pfClearColor[4] = { 0.0f, 0.125f, 0.3f, 1.0f };
+	memcpy(d3dClearValue.Color, pfClearColor, sizeof(float) * 4);
+
+	m_pd3dDevice->CreateCommittedResource(&d3dHeapProperties, D3D12_HEAP_FLAG_NONE, &d3dResourceDesc, D3D12_RESOURCE_STATE_COMMON, &d3dClearValue, __uuidof(ID3D12Resource), (void**)&m_pSceneTexture);
+	m_pSceneTexture->SetName(L"Scene Texture");
+
+	// Create RTV
+	m_d3dSceneTextureRtvCPUHandle = m_pd3dRtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	m_d3dSceneTextureRtvCPUHandle.ptr += (m_nSwapChainBuffers * gnRtvDescriptorIncrementSize);
+	m_pd3dDevice->CreateRenderTargetView(m_pSceneTexture, NULL, m_d3dSceneTextureRtvCPUHandle);
+
+	// Create SRV
+	D3D12_CPU_DESCRIPTOR_HANDLE d3dSrvCPUHandle = CScene::m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	d3dSrvCPUHandle.ptr += (::gnCbvSrvDescriptorIncrementSize * 505); // Use the first new slot
+	
+	D3D12_SHADER_RESOURCE_VIEW_DESC d3dShaderResourceViewDesc;
+	d3dShaderResourceViewDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	d3dShaderResourceViewDesc.Format = d3dResourceDesc.Format;
+	d3dShaderResourceViewDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	d3dShaderResourceViewDesc.Texture2D.MipLevels = 1;
+	d3dShaderResourceViewDesc.Texture2D.MostDetailedMip = 0;
+	d3dShaderResourceViewDesc.Texture2D.PlaneSlice = 0;
+	d3dShaderResourceViewDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+	m_pd3dDevice->CreateShaderResourceView(m_pSceneTexture, &d3dShaderResourceViewDesc, d3dSrvCPUHandle);
+
+	m_d3dSceneTextureSrvGPUHandle = CScene::m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+	m_d3dSceneTextureSrvGPUHandle.ptr += (::gnCbvSrvDescriptorIncrementSize * 505);
+}
+
+void CGameFramework::CreateBlurTexture()
+{
+	D3D12_RESOURCE_DESC d3dResourceDesc = m_pSceneTexture->GetDesc();
+	d3dResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+	D3D12_HEAP_PROPERTIES d3dHeapProperties = CreateHeapProperties(D3D12_HEAP_TYPE_DEFAULT);
+	
+	m_pd3dDevice->CreateCommittedResource(&d3dHeapProperties, D3D12_HEAP_FLAG_NONE, &d3dResourceDesc, D3D12_RESOURCE_STATE_COMMON, NULL, __uuidof(ID3D12Resource), (void**)&m_pBlurTexture);
+	m_pBlurTexture->SetName(L"Blur Texture");
+
+	// Create UAV
+	D3D12_CPU_DESCRIPTOR_HANDLE d3dUavCpuHandle = CScene::m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	d3dUavCpuHandle.ptr += (::gnCbvSrvDescriptorIncrementSize * 506); // Use the second new slot
+
+	D3D12_UNORDERED_ACCESS_VIEW_DESC d3dUavDesc = {};
+	d3dUavDesc.Format = d3dResourceDesc.Format;
+	d3dUavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+	d3dUavDesc.Texture2D.MipSlice = 0;
+
+	m_pd3dDevice->CreateUnorderedAccessView(m_pBlurTexture, NULL, &d3dUavDesc, d3dUavCpuHandle);
+
+	m_d3dBlurTextureUavGPUHandle = CScene::m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+	m_d3dBlurTextureUavGPUHandle.ptr += (::gnCbvSrvDescriptorIncrementSize * 506);
+}
+
+
+
+
+
+void CGameFramework::BuildObjects()
+{
+	float a = XMConvertToDegrees(atan(0.5));
+
+
+	m_pd3dCommandList->Reset(m_pd3dCommandAllocator, NULL);
+
+	m_pScene = new CScene(this);
+	if (m_pScene) m_pScene->BuildObjects(m_pd3dDevice, m_pd3dCommandList);
+
+	CAirplanePlayer *pAirplanePlayer = new CAirplanePlayer(m_pd3dDevice, m_pd3dCommandList, m_pScene->GetGraphicsRootSignature());
+	pAirplanePlayer->SetPosition(XMFLOAT3(920.0f, 745.0f, 1270.0));
+	m_pScene->m_pPlayer = m_pPlayer = pAirplanePlayer;
+	m_pCamera = m_pPlayer->GetCamera();
+
+	m_pd3dCommandList->Close();
+	ID3D12CommandList *ppd3dCommandLists[] = { m_pd3dCommandList };
+	m_pd3dCommandQueue->ExecuteCommandLists(1, ppd3dCommandLists);
+
+	WaitForGpuComplete();
+
+	if (m_pScene) m_pScene->ReleaseUploadBuffers();
+	if (m_pPlayer) m_pPlayer->ReleaseUploadBuffers();
+
+	CreateSceneTexture();
+
+	m_pMotionBlurShader = new CMotionBlurShader();
+	m_pMotionBlurShader->CreateShader(m_pd3dDevice, m_pd3dCommandList, NULL);
+
+	CreateBlurTexture();
+
+	m_GameTimer.Reset();
+}
+
+void CGameFramework::ReleaseObjects()
+{
+	if (m_pPlayer) m_pPlayer->Release();
+
+	if (m_pScene) m_pScene->ReleaseObjects();
+	if (m_pScene) delete m_pScene;
+}
+
+void CGameFramework::ProcessInput()
+{
+	if (m_GameState == GameState::InGame)
+	{
+		static UCHAR pKeysBuffer[256];
+		bool bProcessedByScene = false;
+		if (GetKeyboardState(pKeysBuffer) && m_pScene) bProcessedByScene = m_pScene->ProcessInput(pKeysBuffer);
+		if (!bProcessedByScene)
+		{
+			DWORD dwDirection = 0;
+			if (pKeysBuffer[VK_UP] & 0xF0) dwDirection |= DIR_FORWARD;
+			if (pKeysBuffer[VK_DOWN] & 0xF0) dwDirection |= DIR_BACKWARD;
+			if (pKeysBuffer[VK_LEFT] & 0xF0) dwDirection |= DIR_LEFT;
+			if (pKeysBuffer[VK_RIGHT] & 0xF0) dwDirection |= DIR_RIGHT;
+			if (pKeysBuffer[VK_PRIOR] & 0xF0) dwDirection |= DIR_UP;
+			if (pKeysBuffer[VK_NEXT] & 0xF0) dwDirection |= DIR_DOWN;
+
+			float cxDelta = 0.0f, cyDelta = 0.0f;
+			POINT ptCursorPos;
+			if (GetCapture() == m_hWnd)
+			{
+				SetCursor(NULL);
+				GetCursorPos(&ptCursorPos);
+				cxDelta = (float)(ptCursorPos.x - m_ptOldCursorPos.x) / 3.0f;
+				cyDelta = (float)(ptCursorPos.y - m_ptOldCursorPos.y) / 3.0f;
+				SetCursorPos(m_ptOldCursorPos.x, m_ptOldCursorPos.y);
+			}
+
+			if ((dwDirection != 0) || (cxDelta != 0.0f) || (cyDelta != 0.0f))
+			{
+				if (cxDelta || cyDelta)
+				{
+					if (pKeysBuffer[VK_RBUTTON] & 0xF0)
+						m_pPlayer->Rotate(cyDelta, 0.0f, -cxDelta);
+					else
+						m_pPlayer->Rotate(cyDelta, cxDelta, 0.0f);
+				}
+				if (dwDirection) m_pPlayer->Move(dwDirection, 25.0f * m_fTimeElapsed, true);
+			}
+
+			static float fFireCooldown = 0.0f;
+			fFireCooldown -= m_GameTimer.GetTimeElapsed();
+			if (pKeysBuffer[VK_CONTROL] & 0xF0)
+			{
+				if (fFireCooldown <= 0.0f)
+				{
+					fFireCooldown = 0.2f; // 5 bullets per second
+
+					XMFLOAT3 xmf3Position = m_pPlayer->GetPosition();
+					XMFLOAT3 xmf3Look = m_pPlayer->GetLook();
+					XMFLOAT3 xmf3Up = m_pPlayer->GetUp();
+
+					float fForwardOffset = 6.0f;
+					float fUpOffset = 3.0f;
+
+					XMFLOAT3 xmf3FirePosition = Vector3::Add(xmf3Position, Vector3::ScalarProduct(xmf3Look, fForwardOffset, false));
+					xmf3FirePosition = Vector3::Add(xmf3FirePosition, Vector3::ScalarProduct(xmf3Up, fUpOffset, false));
+
+					if (m_pScene)
+					{
+						m_pScene->SpawnBullet(xmf3FirePosition, xmf3Look);
+					}
+				}
+			}
+		}
+		m_pPlayer->Update(m_GameTimer.GetTimeElapsed(), m_pScene);
+	}
+}
+
+void CGameFramework::AnimateObjects()
+{
+	if (m_GameState == GameState::InGame)
+	{
+		float fTimeElapsed = m_GameTimer.GetTimeElapsed();
+
+		if (m_pScene) m_pScene->AnimateObjects(fTimeElapsed);
+
+		m_pPlayer->Animate(fTimeElapsed, NULL);
+	}
+}
+
+void CGameFramework::WaitForGpuComplete()
+{
+	const UINT64 nFenceValue = ++m_nFenceValues[m_nSwapChainBufferIndex];
+	HRESULT hResult = m_pd3dCommandQueue->Signal(m_pd3dFence, nFenceValue);
+
+	if (m_pd3dFence->GetCompletedValue() < nFenceValue)
+	{
+		hResult = m_pd3dFence->SetEventOnCompletion(nFenceValue, m_hFenceEvent);
+		::WaitForSingleObject(m_hFenceEvent, INFINITE);
+	}
+}
+
+void CGameFramework::MoveToNextFrame()
+{
+	m_nSwapChainBufferIndex = m_pdxgiSwapChain->GetCurrentBackBufferIndex();
+	//m_nSwapChainBufferIndex = (m_nSwapChainBufferIndex + 1) % m_nSwapChainBuffers;
+
+	UINT64 nFenceValue = ++m_nFenceValues[m_nSwapChainBufferIndex];
+	HRESULT hResult = m_pd3dCommandQueue->Signal(m_pd3dFence, nFenceValue);
+
+	if (m_pd3dFence->GetCompletedValue() < nFenceValue)
+	{
+		hResult = m_pd3dFence->SetEventOnCompletion(nFenceValue, m_hFenceEvent);
+		::WaitForSingleObject(m_hFenceEvent, INFINITE);
+	}
+}
+
+//#define _WITH_PLAYER_TOP
+
+void CGameFramework::FrameAdvance()
+{    
+	m_GameTimer.Tick(0.0f);
+	m_fTimeElapsed = m_GameTimer.GetTimeElapsed();
+	
+	ProcessInput();
+
+    AnimateObjects();
+
+	HRESULT hResult = m_pd3dCommandAllocator->Reset();
+	hResult = m_pd3dCommandList->Reset(m_pd3dCommandAllocator, NULL);
+
+	D3D12_RESOURCE_BARRIER d3dResourceBarrier;
+	ID3D12Resource *pSceneTexture = m_pSceneTexture; // 최종 블러 결과 또는 씬 텍스처
+
+	// 1. 그림자 패스 (Shadow Pass)
+	if (m_GameState == GameState::InGame && m_pScene && m_pScene->GetShadowMap())
+	{
+		// 그림자 맵: 읽기 -> 깊이 쓰기
+		d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pScene->GetShadowMap(), D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+		m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
+
+		m_pScene->RenderShadowMap(m_pd3dCommandList, m_pCamera);
+
+		// 그림자 맵: 깊이 쓰기 -> 읽기 (픽셀 셰이더에서 사용)
+		d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pScene->GetShadowMap(), D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_GENERIC_READ);
+		m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
+	}
+
+	// 2. 메인 패스 (Main Pass)
+	// 씬 텍스처: 이전 상태(COMMON 또는 COPY_SOURCE) -> 렌더 타겟
+	d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pSceneTexture, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_RENDER_TARGET);
+	m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
+
+	float pfClearColor[4] = { 0.0f, 0.125f, 0.3f, 1.0f };
+	m_pd3dCommandList->ClearRenderTargetView(m_d3dSceneTextureRtvCPUHandle, pfClearColor, 0, NULL);
+	D3D12_CPU_DESCRIPTOR_HANDLE d3dDsvCPUDescriptorHandle = GetDsvCPUDescriptorHandle();
+	m_pd3dCommandList->ClearDepthStencilView(d3dDsvCPUDescriptorHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, NULL);
+	m_pd3dCommandList->OMSetRenderTargets(1, &m_d3dSceneTextureRtvCPUHandle, TRUE, &d3dDsvCPUDescriptorHandle);
+
+	if (m_pScene) m_pScene->Render(m_pd3dCommandList, m_pCamera);
+
+	// 3. 모션 블러 패스 (Compute Shader)
+	if (m_GameState == GameState::InGame && m_pMotionBlurShader && m_pBlurTexture)
+	{
+		// 씬 텍스처: 렌더 타겟 -> 픽셀 셰이더 리소스 (블러 입력)
+		d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pSceneTexture, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
+
+		// 블러 텍스처: 이전 상태 -> Unordered Access (블러 출력)
+		d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pBlurTexture, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
+
+		m_pd3dCommandList->SetComputeRootSignature(m_pMotionBlurShader->m_pd3dComputeRootSignature);
+		m_pd3dCommandList->SetComputeRootDescriptorTable(0, m_d3dBlurTextureUavGPUHandle);
+		m_pd3dCommandList->SetComputeRootDescriptorTable(1, m_d3dSceneTextureSrvGPUHandle);
+		
+		XMFLOAT3 playerVelocity = m_pPlayer->GetVelocity();
+		float speed = Vector3::Length(playerVelocity);
+		float fSpeed = speed * 0.003f; 
+		if (fSpeed > 1.0f) fSpeed = 1.0f;
+		if (fSpeed < 0.06f) fSpeed = 0.0f;
+		struct BlurInfo { int w, h; float strength; int dir; };
+		BlurInfo cb = { m_nWndClientWidth, m_nWndClientHeight, fSpeed, 0 };
+		m_pd3dCommandList->SetComputeRoot32BitConstants(2, 4, &cb, 0);
+		
+		int nGroupsX = (int)ceilf((float)m_nWndClientWidth / 16.0f);
+		int nGroupsY = (int)ceilf((float)m_nWndClientHeight / 16.0f);
+		m_pMotionBlurShader->Dispatch(m_pd3dCommandList, nGroupsX, nGroupsY, 1);
+
+		// 블러 텍스처: Unordered Access -> 복사 원본
+		d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pBlurTexture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+		m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
+
+		// 씬 텍스처: 픽셀 셰이더 리소스 -> COMMON (다음 프레임을 위해)
+		d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pSceneTexture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
+		m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
+
+		pSceneTexture = m_pBlurTexture;
+	}
+	else
+	{
+		// 씬 텍스처: 렌더 타겟 -> 복사 원본
+		d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pSceneTexture, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+		m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
+	}
+
+	// 4. 최종 결과 복사 (Final Copy to Back Buffer)
+	// 백 버퍼: Present -> 복사 대상
+	d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_ppd3dSwapChainBackBuffers[m_nSwapChainBufferIndex], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
+	m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
+	
+	m_pd3dCommandList->CopyResource(m_ppd3dSwapChainBackBuffers[m_nSwapChainBufferIndex], pSceneTexture);
+
+	// 최종 복사된 텍스처: 복사 원본 -> COMMON (다음 프레임을 위해)
+	d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(pSceneTexture, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
+	m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
+
+	// 백 버퍼: 복사 대상 -> Present
+	d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_ppd3dSwapChainBackBuffers[m_nSwapChainBufferIndex], D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+	m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
+
+	hResult = m_pd3dCommandList->Close();
+	
+	ID3D12CommandList *ppd3dCommandLists[] = { m_pd3dCommandList };
+	m_pd3dCommandQueue->ExecuteCommandLists(1, ppd3dCommandLists);
+
+	WaitForGpuComplete();
+
+#ifdef _WITH_PRESENT_PARAMETERS
+	DXGI_PRESENT_PARAMETERS dxgiPresentParameters;
+	dxgiPresentParameters.DirtyRectsCount = 0;
+	dxgiPresentParameters.pDirtyRects = NULL;
+	dxgiPresentParameters.pScrollRect = NULL;
+	dxgiPresentParameters.pScrollOffset = NULL;
+	m_pdxgiSwapChain->Present1(1, 0, &dxgiPresentParameters);
+#else
+#ifdef _WITH_SYNCH_SWAPCHAIN
+	m_pdxgiSwapChain->Present(1, 0);
+#else
+	m_pdxgiSwapChain->Present(0, 0);
+#endif
+#endif
+
+	MoveToNextFrame();
+
+	m_GameTimer.GetFrameRate(m_pszFrameRate + 12, 37);
+	size_t nLength = _tcslen(m_pszFrameRate);
+	XMFLOAT3 xmf3Position = m_pPlayer->GetPosition();
+	_stprintf_s(m_pszFrameRate + nLength, 70 - nLength, _T("(%4f, %4f, %4f)"), xmf3Position.x, xmf3Position.y, xmf3Position.z);
+	::SetWindowText(m_hWnd, m_pszFrameRate);
+}
+
