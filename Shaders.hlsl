@@ -14,8 +14,6 @@ cbuffer cbShadow          : register(b9)
 {
     matrix                  gmtxShadowTransform; // World -> Light Clip space -> Texture space
     float                   gShadowBias;
-	float					gShadowMapSize; // Added for dynamic texel size calculation
-	float2					gShadowPadding; // Padding to align
 };
 
 cbuffer cbCameraInfo : register(b1)
@@ -105,7 +103,9 @@ float CalcPcfShadow(float4 positionW)
     }
 
     // Point 3: Dynamic Texel Size Calculation
-    float2 texel = float2(1.0f / gShadowMapSize, 1.0f / gShadowMapSize);
+	uint width, height;
+	gShadowMap.GetDimensions(width, height);
+	float2 texel = 1.0f / float2(width, height);
     float  z     = shadowPos.z - gShadowBias;
 
     float s = 0.0f;

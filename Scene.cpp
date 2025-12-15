@@ -223,10 +223,10 @@ void CScene::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* p
 	m_pLightCamera = new CCamera();
 	m_pLightCamera->CreateShaderVariables(pd3dDevice, pd3dCommandList);
 	XMFLOAT4X4 xmf4x4Projection;
-	float shadowMapWidth = 8000.0f; // Increased for debugging frustum culling
-	float shadowMapHeight = 8000.0f; // Increased for debugging frustum culling
+	float shadowMapWidth = 3000.0f; // Increased for debugging frustum culling
+	float shadowMapHeight = 3000.0f; // Increased for debugging frustum culling
 	float shadowNearZ = 1.0f;
-	float shadowFarZ = 5000.0f;
+	float shadowFarZ = 3000.0f;
 	XMStoreFloat4x4(&xmf4x4Projection, XMMatrixOrthographicOffCenterLH(-shadowMapWidth / 2.0f, shadowMapWidth / 2.0f, -shadowMapHeight / 2.0f, shadowMapHeight / 2.0f, shadowNearZ, shadowFarZ));
 	m_pLightCamera->SetProjectionMatrix(xmf4x4Projection);
 
@@ -930,7 +930,6 @@ void CScene::UpdateShaderVariables(ID3D12GraphicsCommandList* pd3dCommandList)
 
         XMStoreFloat4x4(&m_pcbMappedShadowInfo->m_xmf4x4ShadowTransform, XMMatrixTranspose(lightVP * texScaleBiasMatrix));
         m_pcbMappedShadowInfo->m_fShadowBias = 0.005f; // Initial shadow bias, might need tuning
-        m_pcbMappedShadowInfo->m_gShadowMapSize = (float)SHADOW_MAP_WIDTH; // Set shadow map size
     }
     pd3dCommandList->SetGraphicsRootConstantBufferView(18, m_pd3dcbShadowInfo->GetGPUVirtualAddress()); // Root parameter 18 (b9)
 }

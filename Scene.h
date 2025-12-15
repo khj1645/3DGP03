@@ -65,8 +65,7 @@ struct SHADOW_INFO
 {
     XMFLOAT4X4              m_xmf4x4ShadowTransform; // World -> Light Clip space -> Texture space
     float                   m_fShadowBias;
-    float                   m_gShadowMapSize; // Added for dynamic texel size calculation
-    XMFLOAT2                padding; // Adjusted padding to maintain 16-byte alignment
+	XMFLOAT3				padding;
 };
 
 class CDescriptorHeap
