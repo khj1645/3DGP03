@@ -992,9 +992,9 @@ void CTerrainShader::CreateShader(ID3D12Device* pd3dDevice, ID3D12GraphicsComman
 	d3dPipelineStateDesc.RTVFormats[0] = DXGI_FORMAT_UNKNOWN;
 	d3dPipelineStateDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 	d3dRasterizerDesc = CreateRasterizerState();
-	d3dRasterizerDesc.CullMode = D3D12_CULL_MODE_FRONT;
-    d3dRasterizerDesc.DepthBias = 10;
-    d3dRasterizerDesc.SlopeScaledDepthBias = 1.0f;
+	d3dRasterizerDesc.CullMode = D3D12_CULL_MODE_FRONT; // Culling front faces for shadow pass
+    d3dRasterizerDesc.DepthBias = 1000;           // Adjusted DepthBias
+	d3dRasterizerDesc.SlopeScaledDepthBias = 1.5f; // Slope Scaled DepthBias for Peter Panning
 	d3dPipelineStateDesc.RasterizerState = d3dRasterizerDesc;
 	d3dPipelineStateDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 	

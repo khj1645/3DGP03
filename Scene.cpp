@@ -312,10 +312,20 @@ void CScene::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* p
 	m_pSpotlightCamera = new CCamera();
 	m_pSpotlightCamera->CreateShaderVariables(pd3dDevice, pd3dCommandList);
 	XMFLOAT4X4 xmf4x4SpotlightProjection;
-	float fovAngleY = 80.0f; // Spotlight outer cone angle
-	float nearZ = 0.1f;
+	BuildDefaultLightsAndMaterials();
+	// Synchronize FOV with the actual light cone angle for optimal shadow map usage.
+	float lightOuterAngleRad = acos(m_pLights[1].m_fPhi) * 2.0f;
+	float fovAngleY = XMConvertToDegrees(lightOuterAngleRad); // This fovAngleY is now effectively unused for projection, but kept for context.
+
+	float nearZ = 0.1f; // For orthographic, nearZ can be close
 	float farZ = 500.0f; // Spotlight range
-	XMStoreFloat4x4(&xmf4x4SpotlightProjection, XMMatrixPerspectiveFovLH(XMConvertToRadians(fovAngleY), 1.0f, nearZ, farZ));
+	float shadowOrthoSize = 50.0f; // Fixed size for orthographic shadow
+
+	XMStoreFloat4x4(&xmf4x4SpotlightProjection, XMMatrixOrthographicOffCenterLH(
+		-shadowOrthoSize / 2.0f, shadowOrthoSize / 2.0f,
+		-shadowOrthoSize / 2.0f, shadowOrthoSize / 2.0f,
+		nearZ, farZ
+	));
 	m_pSpotlightCamera->SetProjectionMatrix(xmf4x4SpotlightProjection);
 
 	// Create Spotlight Shadow Map Resources
@@ -360,7 +370,7 @@ void CScene::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* p
 	m_d3dSpotlightShadowScissorRect.right = SPOTLIGHT_SHADOW_MAP_WIDTH;
 	m_d3dSpotlightShadowScissorRect.bottom = SPOTLIGHT_SHADOW_MAP_HEIGHT;
 
-	BuildDefaultLightsAndMaterials();
+
 
 	m_nShaders = 6; // Increased from 5 to 6 for ShadowShader
 	m_ppShaders = new CShader * [m_nShaders];
