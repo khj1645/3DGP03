@@ -578,7 +578,7 @@ void CExplosionShader::CreateShader(ID3D12Device* pd3dDevice, ID3D12GraphicsComm
 //
 CObjectsShader::CObjectsShader()
 {
-	m_nObjects = 120;
+	m_nObjects = 60;
 }
 
 CObjectsShader::~CObjectsShader()
@@ -919,7 +919,7 @@ D3D12_SHADER_BYTECODE CTerrainShader::CreateDomainShader()
 void CTerrainShader::CreateShader(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* pd3dCommandList, ID3D12RootSignature* pd3dGraphicsRootSignature)
 {
 	HRESULT hResult;
-	m_nPipelineStates = 4; // Changed to 4 to include Shadow PSO
+	m_nPipelineStates = 4;
 	m_ppd3dPipelineStates = new ID3D12PipelineState * [m_nPipelineStates];
 	::ZeroMemory(m_ppd3dPipelineStates, sizeof(ID3D12PipelineState*) * m_nPipelineStates);
 

@@ -27,7 +27,7 @@ D3D12_RASTERIZER_DESC CShadowShader::CreateRasterizerState()
 {
     D3D12_RASTERIZER_DESC d3dRasterizerDesc = CShader::CreateRasterizerState();
     d3dRasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
-    d3dRasterizerDesc.DepthBias = 1500;
+    d3dRasterizerDesc.DepthBias = 50;
     d3dRasterizerDesc.SlopeScaledDepthBias = 2.0f;
     return(d3dRasterizerDesc);
 }

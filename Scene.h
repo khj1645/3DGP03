@@ -153,6 +153,9 @@ public:
 	void RenderBullets(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* pCamera);
 	void CheckBulletCollisions();
 
+public:
+	bool m_bWireframe = false;
+
 protected:
 	// UI for enemy count
 	CTexture* m_pNumberTexture = nullptr;

@@ -546,7 +546,7 @@ void CScene::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* p
 	CreateShaderVariables(pd3dDevice, pd3dCommandList);
 
 	xmf3Scale = XMFLOAT3(18.0f, 6.0f, 18.0f);
-	m_pcbMappedTerrainTessellation->m_xmf4TessellationFactor = XMFLOAT4(4.0f, 32.0f, 20.0f, 200.0f);
+	m_pcbMappedTerrainTessellation->m_xmf4TessellationFactor = XMFLOAT4(4.0f, 64.0f, 20.0f, 200.0f);
 	m_pcbMappedTerrainTessellation->m_fTerrainHeightScale = xmf3Scale.y;
 }
 
@@ -1020,6 +1020,9 @@ bool CScene::OnProcessingKeyboardMessage(HWND hWnd, UINT nMessageID, WPARAM wPar
 	case WM_KEYDOWN:
 		switch (wParam)
 		{
+		case VK_F4:
+			m_bWireframe = !m_bWireframe;
+			return true;
 		default:
 			break;
 		}
@@ -1310,7 +1313,12 @@ void CScene::Render(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* pCamera
 
 		pd3dCommandList->SetGraphicsRootConstantBufferView(16, m_pd3dcbTerrainTessellation->GetGPUVirtualAddress());
 		if (m_pTerrain)
-			m_pTerrain->Render(pd3dCommandList, pCamera);
+		{
+			if (m_bWireframe)
+				m_pTerrain->Render(pd3dCommandList, pCamera, 2); 
+			else
+				m_pTerrain->Render(pd3dCommandList, pCamera, 0);
+		}
 
 		if (m_pBuildingObject)
 		{

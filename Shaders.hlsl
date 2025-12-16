@@ -38,7 +38,7 @@ cbuffer cbWaterInfo : register(b3)
 
 cbuffer cbTerrainTessellation : register(b8)
 {
-	float4 gvTessellationFactor; // x: MinTess, y: MaxTess, z: MinDist, w: MaxDist
+	float4 gvTessellationFactor;
 	float  gTerrainHeightScale;
 	float3 gvUnused;
 };
@@ -383,10 +383,10 @@ HS_TERRAIN_CONSTANT_DATA HSTerrainConstant(InputPatch<VS_TERRAIN_OUTPUT, 4> ip, 
 {
 	HS_TERRAIN_CONSTANT_DATA o;
 
-	// 패치 중심 (월드)
+	
 	float3 center = 0.25f * (ip[0].posW + ip[1].posW + ip[2].posW + ip[3].posW);
 
-	// 카메라 위치(cbCameraInfo 안의 gvCameraPosition 사용)
+	
 	float dist = distance(center, gvCameraPosition.xyz);
 
 	float minTess = gvTessellationFactor.x;
@@ -394,7 +394,7 @@ HS_TERRAIN_CONSTANT_DATA HSTerrainConstant(InputPatch<VS_TERRAIN_OUTPUT, 4> ip, 
 	float minDist = gvTessellationFactor.z;
 	float maxDist = gvTessellationFactor.w;
 
-	// 0~1 LOD factor
+	
 	float t = saturate((dist - minDist) / (maxDist - minDist));
 	float tess = lerp(maxTess, minTess, t);
 
@@ -405,7 +405,7 @@ HS_TERRAIN_CONSTANT_DATA HSTerrainConstant(InputPatch<VS_TERRAIN_OUTPUT, 4> ip, 
 }
 
 [domain("quad")]
-[partitioning("integer")]
+[partitioning("fractional_even")]
 [outputtopology("triangle_cw")]
 [outputcontrolpoints(4)]
 [patchconstantfunc("HSTerrainConstant")]
@@ -429,7 +429,7 @@ DS_TERRAIN_OUTPUT DSTerrain(HS_TERRAIN_CONSTANT_DATA input, float2 uv : SV_Domai
 {
     DS_TERRAIN_OUTPUT o;
 
-    // 색, UV 보간 (기존 그대로)
+    
     float4 cTop = lerp(patch[0].color, patch[1].color, uv.x);
     float4 cBot = lerp(patch[2].color, patch[3].color, uv.x);
     o.color = lerp(cTop, cBot, uv.y);
@@ -442,16 +442,16 @@ DS_TERRAIN_OUTPUT DSTerrain(HS_TERRAIN_CONSTANT_DATA input, float2 uv : SV_Domai
     float2 uv1Bot = lerp(patch[2].uv1, patch[3].uv1, uv.x);
     o.uv1 = lerp(uv1Top, uv1Bot, uv.y);
 
-    // 위치 보간
+    
     float3 pTop = lerp(patch[0].posW, patch[1].posW, uv.x);
     float3 pBot = lerp(patch[2].posW, patch[3].posW, uv.x);
     o.posW = lerp(pTop, pBot, uv.y);
 
-    //  이 두 줄은 잠시 주석 처리
+   
 	float h = gtxtAlphaTexture.SampleLevel(gssClamp, o.uv0, 0).r;
     o.posW.y += h * gTerrainHeightScale;
 
-    // 최종 클립 좌표
+    
     o.posH = mul(float4(o.posW, 1.0f), gmtxView);
     o.posH = mul(o.posH, gmtxProjection);
 
@@ -710,7 +710,6 @@ void GS_Explosion(point VS_GS_INPUT input[1], inout TriangleStream<GS_PS_INPUT> 
 	outputStream.RestartStrip();
 }
 
-// Pixel Shader: Calculate the correct UV for the sprite sheet and sample the texture
 float4 PS_Explosion(GS_PS_INPUT input) : SV_TARGET
 {
     uint frame = input.frame;
@@ -740,9 +739,6 @@ float4 PSMirror(VS_STANDARD_OUTPUT input) : SV_TARGET
 	return cColor;
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// MOTION BLUR COMPUTE SHADER
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 RWTexture2D<float4> g_OutputTexture : register(u0);
 Texture2D<float4>   g_InputTexture  : register(t0);
@@ -756,22 +752,13 @@ cbuffer cbMotionBlur : register(b4)
     int   g_nDirection;
 };
 
-// 1. 강의 자료처럼 그룹 내 스레드들이 공유할 메모리 선언 (16x16 크기)
 groupshared float4 g_SharedCache[16][16];
 
 [numthreads(16, 16, 1)]
 void CSMotionBlur(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThreadID : SV_GroupThreadID)
 {
-    // 전역 좌표 (이미지 전체에서의 위치)
     int2 texCoord = dispatchThreadID.xy;
-    // 그룹 내 좌표 (0~15, 0~15) - 강의 자료의 구조를 따르기 위해 필요
     int2 localCoord = groupThreadID.xy;
-
-    // -------------------------------------------------------------------------
-    // [강의 자료 스타일] 1. 공유 메모리(L1 캐시)에 데이터 미리 로드 (Pre-loading)
-    // -------------------------------------------------------------------------
-    // 현재 스레드가 담당하는 픽셀을 VRAM에서 읽어와 공유 메모리에 저장합니다.
-    // 경계 검사: 이미지 크기를 벗어나지 않는 경우에만 로드
     if (texCoord.x < g_nWidth && texCoord.y < g_nHeight)
     {
         g_SharedCache[localCoord.y][localCoord.x] = g_InputTexture[texCoord];
@@ -781,15 +768,9 @@ void CSMotionBlur(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThrea
         g_SharedCache[localCoord.y][localCoord.x] = float4(0, 0, 0, 0);
     }
 
-    // -------------------------------------------------------------------------
-    // [강의 자료 스타일] 2. 동기화 (Synchronization)
-    // -------------------------------------------------------------------------
-    // 그룹 내 모든 스레드가 공유 메모리 로딩을 마칠 때까지 대기합니다.
+    
     GroupMemoryBarrierWithGroupSync();
 
-    // -------------------------------------------------------------------------
-    // 3. 블러 연산 (기존 로직 유지 + 최적화)
-    // -------------------------------------------------------------------------
     float2 center = float2(g_nWidth * 0.5f, g_nHeight * 0.5f);
     float2 dir = center - texCoord;
     const int numSamples = 12;
@@ -799,30 +780,20 @@ void CSMotionBlur(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThrea
     {
         float2 offset = dir * (i / (float)numSamples) * g_fBlurStrength;
         
-        // 샘플링할 정확한 위치 (실수 좌표)
         float2 samplePos = texCoord + offset;
-        int2 sampleIntPos = int2(samplePos); // 정수 좌표 변환
+        int2 sampleIntPos = int2(samplePos);
 
-        // ---------------------------------------------------------------------
-        // [강의 자료 응용] 공유 메모리 활용 판단
-        // 샘플링할 위치가 '현재 스레드 그룹(16x16)' 안에 있는지 확인합니다.
-        // dispatchThreadID에서 localCoord를 빼면 현재 그룹의 시작점(Top-Left)을 알 수 있습니다.
-        // ---------------------------------------------------------------------
-        int2 groupStartPos = texCoord - localCoord; // 현재 그룹의 시작 좌표
-        int2 relativePos = sampleIntPos - groupStartPos; // 그룹 내 상대 좌표
+        int2 groupStartPos = texCoord - localCoord;
+        int2 relativePos = sampleIntPos - groupStartPos;
 
-        // 만약 샘플링 위치가 현재 공유 메모리 캐시(0~15 범위) 안에 있다면?
         if (relativePos.x >= 0 && relativePos.x < 16 && 
             relativePos.y >= 0 && relativePos.y < 16)
         {
-            // [Fast] 공유 메모리에서 읽음 (강의 자료 방식)
-            // 주의: 공유 메모리는 Point Sampling이므로 텍스처 필터링(Bilinear) 효과는 약간 줄어들 수 있음
             finalColor += g_SharedCache[relativePos.y][relativePos.x]; 
         }
         else
         {
-            // [Slow] 범위를 벗어나면 기존처럼 텍스처에서 읽음 (VRAM 접근)
-            // 블러 효과를 똑같이 유지하기 위해 Clamp 적용
+
             float2 sampleCoord = clamp(samplePos, float2(0, 0), float2(g_nWidth-1, g_nHeight-1));
             finalColor += g_InputTexture.SampleLevel(g_Sampler, sampleCoord / float2(g_nWidth, g_nHeight), 0);
         }
@@ -830,15 +801,12 @@ void CSMotionBlur(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThrea
     
     finalColor /= numSamples;
 
-    // 결과 출력
     if (texCoord.x < g_nWidth && texCoord.y < g_nHeight)
     {
         g_OutputTexture[texCoord] = finalColor;
     }
 }
-//-----------------------------------------------------------------------------
-// Shadow Map Shaders
-//-----------------------------------------------------------------------------
+
 struct VS_SHADOW_INPUT
 {
 	float3 position : POSITION;
