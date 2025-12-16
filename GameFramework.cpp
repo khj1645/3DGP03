@@ -681,7 +681,7 @@ void CGameFramework::FrameAdvance()
 		d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pScene->GetShadowMap(), D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 		m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
 
-		m_pScene->RenderShadowMap(m_pd3dCommandList, m_pCamera);
+		m_pScene->RenderDirectionalShadowPass(m_pd3dCommandList, m_pCamera);
 
 		// 그림자 맵: 깊이 쓰기 -> 읽기 (픽셀 셰이더에서 사용)
 		d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pScene->GetShadowMap(), D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_GENERIC_READ);
@@ -691,7 +691,7 @@ void CGameFramework::FrameAdvance()
 		d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pScene->GetSpotlightShadowMap(), D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 		m_pd3dCommandList->ResourceBarrier(1, &d3dResourceBarrier);
 
-		m_pScene->RenderSpotlightShadowMap(m_pd3dCommandList, m_pCamera);
+		m_pScene->RenderSpotlightShadowPass(m_pd3dCommandList, m_pCamera);
 
 		// 스포트라이트 그림자 맵: 깊이 쓰기 -> 읽기 (픽셀 셰이더에서 사용)
 		d3dResourceBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_pScene->GetSpotlightShadowMap(), D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_GENERIC_READ);

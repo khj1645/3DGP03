@@ -216,11 +216,11 @@ public:
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
-class CTerrainShader : public CShader
+class CTessellatedTerrainShader : public CShader
 {
 public:
-	CTerrainShader();
-	virtual ~CTerrainShader();
+	CTessellatedTerrainShader();
+	virtual ~CTessellatedTerrainShader();
 
 	virtual D3D12_INPUT_LAYOUT_DESC CreateInputLayout();
 	virtual D3D12_SHADER_BYTECODE CreateVertexShader();

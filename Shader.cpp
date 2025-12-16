@@ -871,15 +871,15 @@ void CPlayerShader::CreateShader(ID3D12Device* pd3dDevice, ID3D12GraphicsCommand
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
-CTerrainShader::CTerrainShader()
+CTessellatedTerrainShader::CTessellatedTerrainShader()
 {
 }
 
-CTerrainShader::~CTerrainShader()
+CTessellatedTerrainShader::~CTessellatedTerrainShader()
 {
 }
 
-D3D12_INPUT_LAYOUT_DESC CTerrainShader::CreateInputLayout()
+D3D12_INPUT_LAYOUT_DESC CTessellatedTerrainShader::CreateInputLayout()
 {
 	UINT nInputElementDescs = 4;
 	D3D12_INPUT_ELEMENT_DESC* pd3dInputElementDescs = new D3D12_INPUT_ELEMENT_DESC[nInputElementDescs];
@@ -896,27 +896,27 @@ D3D12_INPUT_LAYOUT_DESC CTerrainShader::CreateInputLayout()
 	return(d3dInputLayoutDesc);
 }
 
-D3D12_SHADER_BYTECODE CTerrainShader::CreateVertexShader()
+D3D12_SHADER_BYTECODE CTessellatedTerrainShader::CreateVertexShader()
 {
 	return(CShader::CompileShaderFromFile(L"Shaders.hlsl", "VSTerrain", "vs_5_1", &m_pd3dVertexShaderBlob));
 }
 
-D3D12_SHADER_BYTECODE CTerrainShader::CreatePixelShader()
+D3D12_SHADER_BYTECODE CTessellatedTerrainShader::CreatePixelShader()
 {
 	return(CShader::CompileShaderFromFile(L"Shaders.hlsl", "PSTerrain", "ps_5_1", &m_pd3dPixelShaderBlob));
 }
 
-D3D12_SHADER_BYTECODE CTerrainShader::CreateHullShader()
+D3D12_SHADER_BYTECODE CTessellatedTerrainShader::CreateHullShader()
 {
 	return(CShader::CompileShaderFromFile(L"Shaders.hlsl", "HSTerrain", "hs_5_1", &m_pd3dHullShaderBlob));
 }
 
-D3D12_SHADER_BYTECODE CTerrainShader::CreateDomainShader()
+D3D12_SHADER_BYTECODE CTessellatedTerrainShader::CreateDomainShader()
 {
 	return(CShader::CompileShaderFromFile(L"Shaders.hlsl", "DSTerrain", "ds_5_1", &m_pd3dDomainShaderBlob));
 }
 
-void CTerrainShader::CreateShader(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* pd3dCommandList, ID3D12RootSignature* pd3dGraphicsRootSignature)
+void CTessellatedTerrainShader::CreateShader(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* pd3dCommandList, ID3D12RootSignature* pd3dGraphicsRootSignature)
 {
 	HRESULT hResult;
 	m_nPipelineStates = 4;
@@ -1033,21 +1033,14 @@ D3D12_SHADER_BYTECODE CMotionBlurShader::CreateComputeShader()
 
 ID3D12RootSignature* CMotionBlurShader::CreateComputeRootSignature(ID3D12Device* pd3dDevice)
 {
-    // Root Parameters:
-    // 0: Output UAV (RWTexture2D) - u0
-    // 1: Input SRV (Texture2D) - t0
-    // 2: Constants (CBV) - b4
 
     D3D12_DESCRIPTOR_RANGE pd3dDescriptorRanges[2];
-
-    // Range 0: UAV (u0)
     pd3dDescriptorRanges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     pd3dDescriptorRanges[0].NumDescriptors = 1;
     pd3dDescriptorRanges[0].BaseShaderRegister = 0; // u0
     pd3dDescriptorRanges[0].RegisterSpace = 0;
     pd3dDescriptorRanges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    // Range 1: SRV (t0)
     pd3dDescriptorRanges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     pd3dDescriptorRanges[1].NumDescriptors = 1;
     pd3dDescriptorRanges[1].BaseShaderRegister = 0; // t0
@@ -1056,27 +1049,23 @@ ID3D12RootSignature* CMotionBlurShader::CreateComputeRootSignature(ID3D12Device*
 
     D3D12_ROOT_PARAMETER pd3dRootParameters[3];
 
-    // Parameter 0: Descriptor Table for UAV (u0)
     pd3dRootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     pd3dRootParameters[0].DescriptorTable.NumDescriptorRanges = 1;
     pd3dRootParameters[0].DescriptorTable.pDescriptorRanges = &pd3dDescriptorRanges[0];
     pd3dRootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-    // Parameter 1: Descriptor Table for SRV (t0)
     pd3dRootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     pd3dRootParameters[1].DescriptorTable.NumDescriptorRanges = 1;
     pd3dRootParameters[1].DescriptorTable.pDescriptorRanges = &pd3dDescriptorRanges[1];
     pd3dRootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-    // Parameter 2: Root Constants for Blur Info (b4)
-    // int nWidth, int nHeight, float fBlurStrength, int nDirection (4 values)
     pd3dRootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     pd3dRootParameters[2].Constants.Num32BitValues = 4;
     pd3dRootParameters[2].Constants.ShaderRegister = 4; // b4
     pd3dRootParameters[2].Constants.RegisterSpace = 0;
     pd3dRootParameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-	D3D12_ROOT_SIGNATURE_FLAGS d3dRootSignatureFlags = D3D12_ROOT_SIGNATURE_FLAG_NONE; // CS doesn't use Input Assembler
+	D3D12_ROOT_SIGNATURE_FLAGS d3dRootSignatureFlags = D3D12_ROOT_SIGNATURE_FLAG_NONE; 
 	D3D12_ROOT_SIGNATURE_DESC d3dRootSignatureDesc;
 	::ZeroMemory(&d3dRootSignatureDesc, sizeof(D3D12_ROOT_SIGNATURE_DESC));
 	d3dRootSignatureDesc.NumParameters = _countof(pd3dRootParameters);
@@ -1124,7 +1113,7 @@ void CMotionBlurShader::CreateShader(ID3D12Device* pd3dDevice, ID3D12GraphicsCom
 
 	m_nPipelineStates = 1;
 	m_ppd3dPipelineStates = new ID3D12PipelineState * [m_nPipelineStates];
-    m_ppd3dPipelineStates[0] = NULL; // Initialize to NULL
+    m_ppd3dPipelineStates[0] = NULL;
 
 	D3D12_COMPUTE_PIPELINE_STATE_DESC d3dPipelineStateDesc;
 	::ZeroMemory(&d3dPipelineStateDesc, sizeof(D3D12_COMPUTE_PIPELINE_STATE_DESC));
@@ -1144,7 +1133,6 @@ void CMotionBlurShader::CreateShader(ID3D12Device* pd3dDevice, ID3D12GraphicsCom
 
 void CMotionBlurShader::Dispatch(ID3D12GraphicsCommandList* pd3dCommandList, int nWidth, int nHeight, int nDepth)
 {
-    // Root Signature is set externally by caller (FrameAdvance) to allow parameter binding before dispatch
 	pd3dCommandList->SetPipelineState(m_ppd3dPipelineStates[0]);
 	pd3dCommandList->Dispatch(nWidth, nHeight, nDepth);
 }

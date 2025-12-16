@@ -50,9 +50,7 @@ cbuffer cbTerrainTessellation : register(b8)
 	float3 gvUnused;
 };
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Water Shaders
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 struct VS_WATER_INPUT
 {
 	float3 position : POSITION;
@@ -67,8 +65,6 @@ struct VS_WATER_OUTPUT
 
 #include "Light.hlsl"
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
 //#define _WITH_VERTEX_LIGHTING
 
 #define MATERIAL_ALBEDO_MAP			0x01
@@ -94,7 +90,6 @@ Texture2D gtxtWaterDetail1Texture : register(t8);
 SamplerState gssWrap : register(s0);
 SamplerState gssClamp : register(s1);
 
-// Generic shadow calculation function with PCF
 float CalcShadowFactor(float4 positionW, Texture2D<float> shadowMap, matrix shadowTransform, float shadowBias)
 {
     float4 shadowPos = mul(positionW, shadowTransform);
@@ -128,7 +123,6 @@ float CalcShadowFactor(float4 positionW, Texture2D<float> shadowMap, matrix shad
     return s / 9.0f;
 }
 
-// Wrapper for Directional Light Shadow
 float CalcDirectionalPcfShadow(float4 positionW)
 {
 	return CalcShadowFactor(positionW, gShadowMap, gmtxShadowTransform, gShadowBias);
@@ -191,6 +185,7 @@ struct VS_STANDARD_OUTPUT
 	float3 tangentW : TANGENT;
 	float3 bitangentW : BITANGENT;
 	float2 uv : TEXCOORD;
+	bool isReflection : REFLECTION;
 };
 
 VS_STANDARD_OUTPUT VSStandard(VS_STANDARD_INPUT input)
@@ -215,6 +210,10 @@ VS_STANDARD_OUTPUT VSStandard(VS_STANDARD_INPUT input)
     output.tangentW   = T;
     output.bitangentW = B;
     output.normalW    = N;
+
+	// Check if this is a reflection render by checking the determinant of the world matrix.
+	// A negative determinant means the coordinate system has been inverted (reflected).
+	output.isReflection = determinant(gmtxGameObject) < 0;
 
     output.position = mul(mul(posW, gmtxView), gmtxProjection);
     output.uv = input.uv;
@@ -247,21 +246,22 @@ float4 PSStandard(VS_STANDARD_OUTPUT input) : SV_TARGET
     float4 cIllumination = Lighting(input.positionW, normalW);
 
     // Calculate shadow factors for both lights
-    float shadowFactorDir = CalcDirectionalPcfShadow(float4(input.positionW, 1.0f));
-	float shadowFactorSpot = 1.0f;
-
-	// Apply spotlight shadow only for pixels inside the spotlight cone.
-	// This prevents darkening areas that are not lit by the spotlight.
-	if (gLights[1].m_bEnable)
+    float shadowFactor = 1.0f;
+	if (!input.isReflection)
 	{
-		float3 vToLight = normalize(gLights[1].m_vPosition - input.positionW);
-		float fCosAngle = dot(normalize(-gLights[1].m_vDirection), vToLight);
-		if (fCosAngle > gLights[1].m_fPhi)
+		float shadowFactorDir = CalcDirectionalPcfShadow(float4(input.positionW, 1.0f));
+		float shadowFactorSpot = 1.0f;
+		if (gLights[1].m_bEnable)
 		{
-			shadowFactorSpot = CalcSpotlightPcfShadow(float4(input.positionW, 1.0f));
+			float3 vToLight = normalize(gLights[1].m_vPosition - input.positionW);
+			float fCosAngle = dot(normalize(-gLights[1].m_vDirection), vToLight);
+			if (fCosAngle > gLights[1].m_fPhi)
+			{
+				shadowFactorSpot = CalcSpotlightPcfShadow(float4(input.positionW, 1.0f));
+			}
 		}
+		shadowFactor = shadowFactorDir * shadowFactorSpot;
 	}
-	float shadowFactor = shadowFactorDir * shadowFactorSpot;
     
     // Apply shadow factor by lerping between ambient light and full illumination.
     // This is a simple and effective way to apply shadow without complex refactoring.
@@ -283,8 +283,7 @@ float4 PSStandardPlayer(VS_STANDARD_OUTPUT input) : SV_TARGET
 	return c;
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
+
 struct VS_SKYBOX_CUBEMAP_INPUT
 {
 	float3 position : POSITION;
@@ -316,8 +315,6 @@ float4 PSSkyBox(VS_SKYBOX_CUBEMAP_OUTPUT input) : SV_TARGET
 	return(cColor);
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
 struct VS_SPRITE_TEXTURED_INPUT
 {
 	float3 position : POSITION;
@@ -362,8 +359,7 @@ float4 PSTextured(VS_SPRITE_TEXTURED_OUTPUT input, uint nPrimitiveID : SV_Primit
 }
 */
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
+
 Texture2D gtxtTerrainTexture : register(t14);
 Texture2D gtxtDetailTexture : register(t15);
 Texture2D gtxtAlphaTexture : register(t16);
@@ -376,9 +372,7 @@ float4 PSTextured(VS_SPRITE_TEXTURED_OUTPUT input) : SV_TARGET
 	return(cColor);
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Tessellation Shaders
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 struct VS_TERRAIN_INPUT
 {
 	float3 posL : POSITION;
@@ -457,6 +451,7 @@ struct DS_TERRAIN_OUTPUT
 	float4 color : COLOR;
 	float2 uv0 : TEXCOORD0;
 	float2 uv1 : TEXCOORD1;
+	bool isReflection : REFLECTION;
 };
 
 [domain("quad")]
@@ -464,7 +459,7 @@ DS_TERRAIN_OUTPUT DSTerrain(HS_TERRAIN_CONSTANT_DATA input, float2 uv : SV_Domai
 {
     DS_TERRAIN_OUTPUT o;
 
-    
+    // 색, UV 보간 (기존 그대로)
     float4 cTop = lerp(patch[0].color, patch[1].color, uv.x);
     float4 cBot = lerp(patch[2].color, patch[3].color, uv.x);
     o.color = lerp(cTop, cBot, uv.y);
@@ -477,16 +472,18 @@ DS_TERRAIN_OUTPUT DSTerrain(HS_TERRAIN_CONSTANT_DATA input, float2 uv : SV_Domai
     float2 uv1Bot = lerp(patch[2].uv1, patch[3].uv1, uv.x);
     o.uv1 = lerp(uv1Top, uv1Bot, uv.y);
 
-    
+    // 위치 보간
     float3 pTop = lerp(patch[0].posW, patch[1].posW, uv.x);
     float3 pBot = lerp(patch[2].posW, patch[3].posW, uv.x);
     o.posW = lerp(pTop, pBot, uv.y);
 
-   
+	o.isReflection = determinant(gmtxGameObject) < 0;
+
+    //  이 두 줄은 잠시 주석 처리
 	float h = gtxtAlphaTexture.SampleLevel(gssClamp, o.uv0, 0).r;
     o.posW.y += h * gTerrainHeightScale;
 
-    
+    // 최종 클립 좌표
     o.posH = mul(float4(o.posW, 1.0f), gmtxView);
     o.posH = mul(o.posH, gmtxProjection);
 
@@ -502,19 +499,23 @@ float4 PSTerrain(DS_TERRAIN_OUTPUT input) : SV_TARGET
     float4 albedo = cBaseTexColor * 0.7f + cDetailTexColor * 0.3f;
 
     // (추가) 그림자 계수
-    float shadowDir = CalcDirectionalPcfShadow(float4(input.posW, 1.0f));
-	float shadowSpot = 1.0f;
-	
-	if (gLights[1].m_bEnable)
+	float shadow = 1.0f;
+	if (!input.isReflection)
 	{
-		float3 vToLight = normalize(gLights[1].m_vPosition - input.posW);
-		float fCosAngle = dot(normalize(-gLights[1].m_vDirection), vToLight);
-		if (fCosAngle > gLights[1].m_fPhi)
+		float shadowDir = CalcDirectionalPcfShadow(float4(input.posW, 1.0f));
+		float shadowSpot = 1.0f;
+	
+		if (gLights[1].m_bEnable)
 		{
-			shadowSpot = CalcSpotlightPcfShadow(float4(input.posW, 1.0f));
+			float3 vToLight = normalize(gLights[1].m_vPosition - input.posW);
+			float fCosAngle = dot(normalize(-gLights[1].m_vDirection), vToLight);
+			if (fCosAngle > gLights[1].m_fPhi)
+			{
+				shadowSpot = CalcSpotlightPcfShadow(float4(input.posW, 1.0f));
+			}
 		}
+		shadow = shadowDir * shadowSpot;
 	}
-	float shadow = shadowDir * shadowSpot;
 
     // (추가) 지형은 조명이 약하니까 “완전 검정” 말고 ambient를 남겨주는 게 보기 좋음
     float3 ambient = albedo.rgb * 0.05f; // Use a much darker ambient for higher contrast
@@ -528,21 +529,17 @@ float4 PSTerrain(DS_TERRAIN_OUTPUT input) : SV_TARGET
 }
 
 
-
-// Tessellation Shaders for Shadow Map
 VS_TERRAIN_OUTPUT VS_TERRAIN_SHADOW(VS_TERRAIN_INPUT input)
 {
 	VS_TERRAIN_OUTPUT o;
 	float4 posW = mul(float4(input.posL, 1.0f), gmtxGameObject);
 	o.posW = posW.xyz;
-	// We don't need color or uvs for the shadow pass, but the struct is shared
 	o.color = float4(0,0,0,0);
 	o.uv0 = input.uv0;
 	o.uv1 = float2(0,0);
 	return o;
 }
 
-// Hull shader can be reused, as it only calculates tessellation factors based on distance
 HS_TERRAIN_CONSTANT_DATA HS_TERRAIN_SHADOW(InputPatch<VS_TERRAIN_OUTPUT, 4> ip, uint PatchID : SV_PrimitiveID)
 {
 	return HSTerrainConstant(ip, PatchID);
@@ -551,23 +548,19 @@ struct VS_SHADOW_OUTPUT
 {
 	float4 position : SV_POSITION;
 };
-// Domain shader for shadow pass: only calculates position
 [domain("quad")]
 VS_SHADOW_OUTPUT DS_TERRAIN_SHADOW(HS_TERRAIN_CONSTANT_DATA input, float2 uv : SV_DomainLocation, const OutputPatch<VS_TERRAIN_OUTPUT, 4> patch)
 {
     VS_SHADOW_OUTPUT o;
 
-    // Interpolate world position
     float3 pTop = lerp(patch[0].posW, patch[1].posW, uv.x);
     float3 pBot = lerp(patch[2].posW, patch[3].posW, uv.x);
     float3 posW = lerp(pTop, pBot, uv.y);
 
-	// Interpolate UVs for height map lookup
 	float2 uv0Top = lerp(patch[0].uv0, patch[1].uv0, uv.x);
     float2 uv0Bot = lerp(patch[2].uv0, patch[3].uv0, uv.x);
     float2 uv0 = lerp(uv0Top, uv0Bot, uv.y);
 
-    // Get height from texture
 	float h = gtxtAlphaTexture.SampleLevel(gssClamp, uv0, 0).r;
     posW.y += h * gTerrainHeightScale;
 
@@ -580,12 +573,9 @@ VS_SHADOW_OUTPUT DS_TERRAIN_SHADOW(HS_TERRAIN_CONSTANT_DATA input, float2 uv : S
 
 
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// UI SHADERS
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 Texture2D gtxtUITexture : register(t0);
 
-// VS_SPRITE_TEXTURED_INPUT and VS_SPRITE_TEXTURED_OUTPUT are already defined and are suitable for UI.
 
 VS_SPRITE_TEXTURED_OUTPUT VS_UI(VS_SPRITE_TEXTURED_INPUT input)
 {
@@ -602,31 +592,24 @@ float4 PS_UI(VS_SPRITE_TEXTURED_OUTPUT input) : SV_TARGET
 	return gtxtUITexture.Sample(gssWrap, input.uv);
 }
 
-//-------------------------------------------------------------------------------------------------------------------------------------------------
-// Billboard Shaders
-//-------------------------------------------------------------------------------------------------------------------------------------------------
+
 
 Texture2D gtxtBillboard : register(t17); // 단일 텍스처로 변경
 
-//-------------------------------------------------------------------------------------------------------------------------------------------------
-// VS_INPUT: 애플리케이션에서 정점 하나의 정보를 받습니다.
-//-------------------------------------------------------------------------------------------------------------------------------------------------
+
 struct VS_BILLBOARD_INPUT
 {
 	float3 position : POSITION; // 빌보드가 생성될 월드 공간의 위치
 };
 
-//-------------------------------------------------------------------------------------------------------------------------------------------------
-// GS_INPUT: Vertex Shader에서 넘어온 정보를 받습니다.
-//-------------------------------------------------------------------------------------------------------------------------------------------------
+
+
 struct GS_BILLBOARD_INPUT
 {
 	float3 position : POSITION; // VS에서 전달된 월드 공간 위치
 };
 
-//-------------------------------------------------------------------------------------------------------------------------------------------------
-// PS_INPUT: Geometry Shader에서 생성된 정점 정보를 받습니다.
-//-------------------------------------------------------------------------------------------------------------------------------------------------
+
 struct PS_BILLBOARD_INPUT
 {
 	float4 position : SV_POSITION; // 최종 클립 공간 위치
@@ -874,5 +857,4 @@ VS_SHADOW_OUTPUT VS_SHADOW(VS_SHADOW_INPUT input)
 
 void PS_NULL(VS_SHADOW_OUTPUT input)
 {
-    // Depth-only pass, no pixel output
 }

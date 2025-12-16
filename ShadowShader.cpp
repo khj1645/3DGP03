@@ -1,6 +1,3 @@
-//-----------------------------------------------------------------------------
-// File: ShadowShader.cpp
-//-----------------------------------------------------------------------------
 #include "stdafx.h"
 #include "ShadowShader.h"
 
@@ -53,7 +50,6 @@ D3D12_SHADER_BYTECODE CShadowShader::CreatePixelShader()
 
 void CShadowShader::CreateShader(ID3D12Device *pd3dDevice, ID3D12GraphicsCommandList *pd3dCommandList, ID3D12RootSignature *pd3dGraphicsRootSignature)
 {
-	// Clean up previous states if any
 	if (m_ppd3dPipelineStates)
 	{
 		for (int i = 0; i < m_nPipelineStates; i++)
@@ -61,7 +57,6 @@ void CShadowShader::CreateShader(ID3D12Device *pd3dDevice, ID3D12GraphicsCommand
 		delete[] m_ppd3dPipelineStates;
 	}
 
-    // Allocate the array for pipeline states
     m_nPipelineStates = 1;
 	m_ppd3dPipelineStates = new ID3D12PipelineState*[m_nPipelineStates];
 	::ZeroMemory(m_ppd3dPipelineStates, sizeof(ID3D12PipelineState*) * m_nPipelineStates);
@@ -86,7 +81,6 @@ void CShadowShader::CreateShader(ID3D12Device *pd3dDevice, ID3D12GraphicsCommand
 
 	if (d3dPipelineStateDesc.InputLayout.pInputElementDescs) delete[] d3dPipelineStateDesc.InputLayout.pInputElementDescs;
 
-    // Blobs are members of CShader and are released by its destructor.
     if (m_pd3dVertexShaderBlob) m_pd3dVertexShaderBlob->Release();
     if (m_pd3dPixelShaderBlob) m_pd3dPixelShaderBlob->Release();
 }

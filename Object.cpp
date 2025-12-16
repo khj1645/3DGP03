@@ -76,8 +76,6 @@ void CTexture::SetSampler(int nIndex, D3D12_GPU_DESCRIPTOR_HANDLE d3dSamplerGpuD
 
 void CTexture::UpdateShaderVariables(ID3D12GraphicsCommandList* pd3dCommandList)
 {
-	// Assuming all textures managed by this CTexture object are part of a single descriptor table
-	// and share the same root parameter index (stored at index 0).
 	if (m_nTextures > 0 && m_pnRootParameterIndices[0] != -1 && m_pd3dSrvGpuDescriptorHandles[0].ptr)
 	{
 		pd3dCommandList->SetGraphicsRootDescriptorTable(m_pnRootParameterIndices[0], m_pd3dSrvGpuDescriptorHandles[0]);
@@ -1138,7 +1136,7 @@ CHeightMapTerrain::CHeightMapTerrain(ID3D12Device* pd3dDevice, ID3D12GraphicsCom
 	pTerrainTexture->LoadTextureFromDDSFile(pd3dDevice, pd3dCommandList, L"Terrain/HeightMap(Alpha).dds", RESOURCE_TEXTURE2D, 2);
 	CScene::CreateShaderResourceViews(pd3dDevice, pTerrainTexture, 0, 11);
 
-	CTerrainShader* pTerrainShader = new CTerrainShader();
+	CTessellatedTerrainShader* pTerrainShader = new CTessellatedTerrainShader();
 	pTerrainShader->CreateShader(pd3dDevice, pd3dCommandList, pd3dGraphicsRootSignature);
 	pTerrainShader->CreateShaderVariables(pd3dDevice, pd3dCommandList);
 

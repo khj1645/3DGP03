@@ -129,8 +129,8 @@ public:
 	bool ProcessInput(UCHAR *pKeysBuffer);
     void AnimateObjects(float fTimeElapsed);
     void Render(ID3D12GraphicsCommandList *pd3dCommandList, CCamera *pCamera=NULL);
-	void RenderShadowMap(ID3D12GraphicsCommandList *pd3dCommandList, CCamera *pCamera); // 그림자 패스 렌더링 함수
-	void RenderSpotlightShadowMap(ID3D12GraphicsCommandList *pd3dCommandList, CCamera *pCamera);
+	void RenderDirectionalShadowPass(ID3D12GraphicsCommandList *pd3dCommandList, CCamera *pCamera);
+	void RenderSpotlightShadowPass(ID3D12GraphicsCommandList *pd3dCommandList, CCamera *pCamera);
 	ID3D12Resource* GetShadowMap() { return m_pd3dShadowMap; } // GameFramework에서 그림자 맵 리소스에 접근하기 위한 getter
 	ID3D12Resource* GetSpotlightShadowMap() { return m_pd3dSpotlightShadowMap; }
 
@@ -244,7 +244,7 @@ protected:
 
 	CBillboardShader*					m_pBillboardShader = NULL; // Added for billboard shader
 	CTexture*							m_pBillboardTexture = NULL; // Added for billboard texture
-	CTerrainShader*						m_pTerrainShader = NULL;
+	CTessellatedTerrainShader*			m_pTerrainShader = NULL;
 
 	LIGHT								*m_pLights = NULL;
 	int									m_nLights = 0;
