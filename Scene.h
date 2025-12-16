@@ -130,7 +130,9 @@ public:
     void AnimateObjects(float fTimeElapsed);
     void Render(ID3D12GraphicsCommandList *pd3dCommandList, CCamera *pCamera=NULL);
 	void RenderShadowMap(ID3D12GraphicsCommandList *pd3dCommandList, CCamera *pCamera); // 그림자 패스 렌더링 함수
+	void RenderSpotlightShadowMap(ID3D12GraphicsCommandList *pd3dCommandList, CCamera *pCamera);
 	ID3D12Resource* GetShadowMap() { return m_pd3dShadowMap; } // GameFramework에서 그림자 맵 리소스에 접근하기 위한 getter
+	ID3D12Resource* GetSpotlightShadowMap() { return m_pd3dSpotlightShadowMap; }
 
 	void ReleaseUploadBuffers();
 
@@ -209,6 +211,18 @@ protected:
 	// 광원 카메라 (그림자 맵 생성을 위해)
 	CCamera*                    m_pLightCamera = nullptr;
 
+	// Spotlight Shadow Map Resources
+	ID3D12Resource*             m_pd3dSpotlightShadowMap = nullptr;
+	ID3D12DescriptorHeap*       m_pd3dSpotlightShadowDsvHeap = nullptr;
+	D3D12_CPU_DESCRIPTOR_HANDLE m_d3dSpotlightShadowDsvCpuHandle;
+	D3D12_GPU_DESCRIPTOR_HANDLE m_d3dSpotlightShadowSrvGpuHandle;
+
+	D3D12_VIEWPORT              m_d3dSpotlightShadowViewport;
+	D3D12_RECT                  m_d3dSpotlightShadowScissorRect;
+    
+	// Spotlight Camera
+	CCamera*                    m_pSpotlightCamera = nullptr;
+
 	int									m_nGameObjects = 0;
 	CGameObject							**m_ppGameObjects = NULL;
 
@@ -248,6 +262,9 @@ protected:
 
 	ID3D12Resource						*m_pd3dcbShadowInfo = NULL;
 	SHADOW_INFO							*m_pcbMappedShadowInfo = NULL;
+
+	ID3D12Resource						*m_pd3dcbSpotlightShadowInfo = NULL;
+	SHADOW_INFO							*m_pcbMappedSpotlightShadowInfo = NULL;
 
 public:
 	CMirrorShader*						m_pMirrorShader = NULL;

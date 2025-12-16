@@ -187,8 +187,8 @@ void CScene::BuildDefaultLightsAndMaterials()
 	m_pLights[1].m_xmf3Direction = XMFLOAT3(0.0f, 0.0f, 1.0f);
 	m_pLights[1].m_xmf3Attenuation = XMFLOAT3(1.0f, 0.01f, 0.0001f);
 	m_pLights[1].m_fFalloff = 8.0f;
-	m_pLights[1].m_fPhi = (float)cos(XMConvertToRadians(40.0f));
-	m_pLights[1].m_fTheta = (float)cos(XMConvertToRadians(20.0f));
+	m_pLights[1].m_fPhi = (float)cos(XMConvertToRadians(20.0f));
+	m_pLights[1].m_fTheta = (float)cos(XMConvertToRadians(10.0f));
 	m_pLights[2].m_bEnable = true;
 	m_pLights[2].m_nType = DIRECTIONAL_LIGHT;
 	m_pLights[2].m_xmf4Ambient = XMFLOAT4(0.3f, 0.3f, 0.3f, 1.0f);
@@ -307,6 +307,58 @@ void CScene::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* p
 	m_d3dShadowScissorRect.top = 0;
 	m_d3dShadowScissorRect.right = SHADOW_MAP_WIDTH;
 	m_d3dShadowScissorRect.bottom = SHADOW_MAP_HEIGHT;
+
+	// Create Spotlight Camera (Perspective Projection)
+	m_pSpotlightCamera = new CCamera();
+	m_pSpotlightCamera->CreateShaderVariables(pd3dDevice, pd3dCommandList);
+	XMFLOAT4X4 xmf4x4SpotlightProjection;
+	float fovAngleY = 80.0f; // Spotlight outer cone angle
+	float nearZ = 0.1f;
+	float farZ = 500.0f; // Spotlight range
+	XMStoreFloat4x4(&xmf4x4SpotlightProjection, XMMatrixPerspectiveFovLH(XMConvertToRadians(fovAngleY), 1.0f, nearZ, farZ));
+	m_pSpotlightCamera->SetProjectionMatrix(xmf4x4SpotlightProjection);
+
+	// Create Spotlight Shadow Map Resources
+	const int SPOTLIGHT_SHADOW_MAP_WIDTH = 1024;
+	const int SPOTLIGHT_SHADOW_MAP_HEIGHT = 1024;
+
+	D3D12_RESOURCE_DESC d3dSpotlightResourceDesc = d3dResourceDesc;
+	d3dSpotlightResourceDesc.Width = SPOTLIGHT_SHADOW_MAP_WIDTH;
+	d3dSpotlightResourceDesc.Height = SPOTLIGHT_SHADOW_MAP_HEIGHT;
+
+	pd3dDevice->CreateCommittedResource(
+		&d3dHeapProperties,
+		D3D12_HEAP_FLAG_NONE,
+		&d3dSpotlightResourceDesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		&d3dClearValue,
+		__uuidof(ID3D12Resource),
+		(void**)&m_pd3dSpotlightShadowMap
+	);
+
+	D3D12_DESCRIPTOR_HEAP_DESC d3dSpotlightDsvHeapDesc = d3dDsvHeapDesc;
+	pd3dDevice->CreateDescriptorHeap(&d3dSpotlightDsvHeapDesc, __uuidof(ID3D12DescriptorHeap), (void**)&m_pd3dSpotlightShadowDsvHeap);
+
+	m_d3dSpotlightShadowDsvCpuHandle = m_pd3dSpotlightShadowDsvHeap->GetCPUDescriptorHandleForHeapStart();
+	pd3dDevice->CreateDepthStencilView(m_pd3dSpotlightShadowMap, &d3dDsvDesc, m_d3dSpotlightShadowDsvCpuHandle);
+
+	D3D12_SHADER_RESOURCE_VIEW_DESC d3dSpotlightSrvDesc = d3dSrvDesc;
+	m_d3dSpotlightShadowSrvGpuHandle = m_pDescriptorHeap->m_d3dSrvGPUDescriptorNextHandle;
+	pd3dDevice->CreateShaderResourceView(m_pd3dSpotlightShadowMap, &d3dSpotlightSrvDesc, m_pDescriptorHeap->m_d3dSrvCPUDescriptorNextHandle);
+	m_pDescriptorHeap->m_d3dSrvCPUDescriptorNextHandle.ptr += ::gnCbvSrvDescriptorIncrementSize;
+	m_pDescriptorHeap->m_d3dSrvGPUDescriptorNextHandle.ptr += ::gnCbvSrvDescriptorIncrementSize;
+
+	m_d3dSpotlightShadowViewport.Width = (float)SPOTLIGHT_SHADOW_MAP_WIDTH;
+	m_d3dSpotlightShadowViewport.Height = (float)SPOTLIGHT_SHADOW_MAP_HEIGHT;
+	m_d3dSpotlightShadowViewport.MinDepth = 0.0f;
+	m_d3dSpotlightShadowViewport.MaxDepth = 1.0f;
+	m_d3dSpotlightShadowViewport.TopLeftX = 0;
+	m_d3dSpotlightShadowViewport.TopLeftY = 0;
+
+	m_d3dSpotlightShadowScissorRect.left = 0;
+	m_d3dSpotlightShadowScissorRect.top = 0;
+	m_d3dSpotlightShadowScissorRect.right = SPOTLIGHT_SHADOW_MAP_WIDTH;
+	m_d3dSpotlightShadowScissorRect.bottom = SPOTLIGHT_SHADOW_MAP_HEIGHT;
 
 	BuildDefaultLightsAndMaterials();
 
@@ -623,6 +675,10 @@ void CScene::ReleaseObjects()
     if (m_pLightCamera) delete m_pLightCamera;
     if (m_pd3dShadowMap) m_pd3dShadowMap->Release();
     if (m_pd3dShadowDsvHeap) m_pd3dShadowDsvHeap->Release();
+
+	if (m_pSpotlightCamera) delete m_pSpotlightCamera;
+	if (m_pd3dSpotlightShadowMap) m_pd3dSpotlightShadowMap->Release();
+	if (m_pd3dSpotlightShadowDsvHeap) m_pd3dSpotlightShadowDsvHeap->Release();
 }
 
 ID3D12RootSignature* CScene::CreateGraphicsRootSignature(ID3D12Device* pd3dDevice)
@@ -710,7 +766,14 @@ ID3D12RootSignature* CScene::CreateGraphicsRootSignature(ID3D12Device* pd3dDevic
 	pd3dDescriptorRanges[12].RegisterSpace = 0;
 	pd3dDescriptorRanges[12].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-	D3D12_ROOT_PARAMETER pd3dRootParameters[19];
+	// Spotlight Shadow Map SRV
+	pd3dDescriptorRanges[13].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	pd3dDescriptorRanges[13].NumDescriptors = 1;
+	pd3dDescriptorRanges[13].BaseShaderRegister = 32; //t32: gtxtSpotlightShadowMap
+	pd3dDescriptorRanges[13].RegisterSpace = 0;
+	pd3dDescriptorRanges[13].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+	D3D12_ROOT_PARAMETER pd3dRootParameters[21];
 
 	pd3dRootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
 	pd3dRootParameters[0].Descriptor.ShaderRegister = 1; //Camera
@@ -810,6 +873,18 @@ ID3D12RootSignature* CScene::CreateGraphicsRootSignature(ID3D12Device* pd3dDevic
 	pd3dRootParameters[18].Descriptor.RegisterSpace = 0;
 	pd3dRootParameters[18].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+	// Root Parameter 19: Spotlight Shadow Map SRV Descriptor Table (t32)
+	pd3dRootParameters[19].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	pd3dRootParameters[19].DescriptorTable.NumDescriptorRanges = 1;
+	pd3dRootParameters[19].DescriptorTable.pDescriptorRanges = &(pd3dDescriptorRanges[13]); 
+	pd3dRootParameters[19].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+	// Root Parameter 20: Spotlight Shadow Info CBV (b10)
+	pd3dRootParameters[20].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+	pd3dRootParameters[20].Descriptor.ShaderRegister = 10; // Spotlight Shadow Info (b10)
+	pd3dRootParameters[20].Descriptor.RegisterSpace = 0;
+	pd3dRootParameters[20].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
 	D3D12_STATIC_SAMPLER_DESC pd3dSamplerDescs[3]; // Increase count to 3
 
 	pd3dSamplerDescs[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -902,6 +977,10 @@ void CScene::CreateShaderVariables(ID3D12Device* pd3dDevice, ID3D12GraphicsComma
     ncbElementBytes = ((sizeof(SHADOW_INFO) + 255) & ~255); //256
     m_pd3dcbShadowInfo = ::CreateBufferResource(pd3dDevice, pd3dCommandList, NULL, ncbElementBytes, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, NULL);
     m_pd3dcbShadowInfo->Map(0, NULL, (void**)&m_pcbMappedShadowInfo);
+
+	// Create and map Spotlight Shadow Info constant buffer
+	m_pd3dcbSpotlightShadowInfo = ::CreateBufferResource(pd3dDevice, pd3dCommandList, NULL, ncbElementBytes, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, NULL);
+	m_pd3dcbSpotlightShadowInfo->Map(0, NULL, (void**)&m_pcbMappedSpotlightShadowInfo);
 }
 
 void CScene::UpdateShaderVariables(ID3D12GraphicsCommandList* pd3dCommandList)
@@ -929,9 +1008,28 @@ void CScene::UpdateShaderVariables(ID3D12GraphicsCommandList* pd3dCommandList)
         );
 
         XMStoreFloat4x4(&m_pcbMappedShadowInfo->m_xmf4x4ShadowTransform, XMMatrixTranspose(lightVP * texScaleBiasMatrix));
-        m_pcbMappedShadowInfo->m_fShadowBias = 0.005f; // Initial shadow bias, might need tuning
+        m_pcbMappedShadowInfo->m_fShadowBias = 0.0001f; // Adjusted shadow bias
     }
     pd3dCommandList->SetGraphicsRootConstantBufferView(18, m_pd3dcbShadowInfo->GetGPUVirtualAddress()); // Root parameter 18 (b9)
+
+	// Update Spotlight Shadow Info constant buffer
+	if (m_pcbMappedSpotlightShadowInfo && m_pSpotlightCamera && m_pPlayer && m_pLights[1].m_bEnable) // Check if spotlight is enabled
+	{
+		XMMATRIX lightView = XMLoadFloat4x4(&m_pSpotlightCamera->GetViewMatrix());
+		XMMATRIX lightProj = XMLoadFloat4x4(&m_pSpotlightCamera->GetProjectionMatrix());
+		XMMATRIX lightVP = lightView * lightProj;
+
+		XMMATRIX texScaleBiasMatrix = XMMatrixSet(
+			0.5f, 0.0f, 0.0f, 0.0f,
+			0.0f, -0.5f, 0.0f, 0.0f,
+			0.0f, 0.0f, 1.0f, 0.0f,
+			0.5f, 0.5f, 0.0f, 1.0f
+		);
+
+		XMStoreFloat4x4(&m_pcbMappedSpotlightShadowInfo->m_xmf4x4ShadowTransform, XMMatrixTranspose(lightVP * texScaleBiasMatrix));
+		m_pcbMappedSpotlightShadowInfo->m_fShadowBias = 0.0001f; // Adjusted shadow bias
+	}
+	pd3dCommandList->SetGraphicsRootConstantBufferView(20, m_pd3dcbSpotlightShadowInfo->GetGPUVirtualAddress()); // Root parameter 20 (b10)
 }
 
 void CScene::ReleaseShaderVariables()
@@ -960,6 +1058,12 @@ void CScene::ReleaseShaderVariables()
         m_pd3dcbShadowInfo->Unmap(0, NULL);
         m_pd3dcbShadowInfo->Release();
     }
+
+	if (m_pd3dcbSpotlightShadowInfo)
+	{
+		m_pd3dcbSpotlightShadowInfo->Unmap(0, NULL);
+		m_pd3dcbSpotlightShadowInfo->Release();
+	}
 
 	if (m_pTerrain) m_pTerrain->ReleaseShaderVariables();
 	if (m_pSkyBox) m_pSkyBox->ReleaseShaderVariables();
@@ -1305,6 +1409,8 @@ void CScene::Render(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* pCamera
 		
 		// Bind Shadow Map and Shadow Info CBV for main pass
 		pd3dCommandList->SetGraphicsRootDescriptorTable(17, m_d3dShadowSrvGpuHandle);
+		// Bind Spotlight Shadow Map
+		pd3dCommandList->SetGraphicsRootDescriptorTable(19, m_d3dSpotlightShadowSrvGpuHandle);
 
 		D3D12_GPU_VIRTUAL_ADDRESS d3dcbLightsGpuVirtualAddress = m_pd3dcbLights->GetGPUVirtualAddress();
 		pd3dCommandList->SetGraphicsRootConstantBufferView(2, d3dcbLightsGpuVirtualAddress);
@@ -1375,103 +1481,169 @@ void CScene::Render(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* pCamera
 	}
 }
 
-void CScene::RenderShadowMap(ID3D12GraphicsCommandList *pd3dCommandList, CCamera *pMainCamera)
+void CScene::RenderShadowMap(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* pMainCamera)
 {
 
-    // 1. 뷰포트 및 시저 사각형 설정
-    pd3dCommandList->RSSetViewports(1, &m_d3dShadowViewport);
-    pd3dCommandList->RSSetScissorRects(1, &m_d3dShadowScissorRect);
+	// 1. 뷰포트 및 시저 사각형 설정
+	pd3dCommandList->RSSetViewports(1, &m_d3dShadowViewport);
+	pd3dCommandList->RSSetScissorRects(1, &m_d3dShadowScissorRect);
 
-    // 2. DSV 초기화
-    pd3dCommandList->ClearDepthStencilView(m_d3dShadowDsvCpuHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, NULL);
+	// 2. DSV 초기화
+	pd3dCommandList->ClearDepthStencilView(m_d3dShadowDsvCpuHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, NULL);
 
-    // 3. 렌더 타겟 설정
-    pd3dCommandList->OMSetRenderTargets(0, NULL, FALSE, &m_d3dShadowDsvCpuHandle);
+	// 3. 렌더 타겟 설정
+	pd3dCommandList->OMSetRenderTargets(0, NULL, FALSE, &m_d3dShadowDsvCpuHandle);
 
-    // 4. 전역 루트 시그니처 및 디스크립터 힙 설정
-    pd3dCommandList->SetGraphicsRootSignature(m_pd3dGraphicsRootSignature);
-    ID3D12DescriptorHeap* ppHeaps[] = { m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap };
+	// 4. 전역 루트 시그니처 및 디스크립터 힙 설정
+	pd3dCommandList->SetGraphicsRootSignature(m_pd3dGraphicsRootSignature);
+	ID3D12DescriptorHeap* ppHeaps[] = { m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap };
 	pd3dCommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 
-    // 5. 광원 카메라 업데이트
-    XMVECTOR lightDir = XMLoadFloat3(&m_pLights[2].m_xmf3Direction);
-    lightDir = XMVector3Normalize(lightDir);
-    XMFLOAT3 playerPos = m_pPlayer->GetPosition();
+	// 5. 광원 카메라 업데이트
+	XMVECTOR lightDir = XMLoadFloat3(&m_pLights[2].m_xmf3Direction);
+	lightDir = XMVector3Normalize(lightDir);
+	XMFLOAT3 playerPos = m_pPlayer->GetPosition();
 	XMVECTOR lightPosition = XMLoadFloat3(&playerPos) - (lightDir * 500.0f);
-    XMVECTOR lookAt = XMLoadFloat3(&playerPos);
-    XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	XMVECTOR lookAt = XMLoadFloat3(&playerPos);
+	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 	XMFLOAT4X4 xmf4x4View;
 	XMStoreFloat4x4(&xmf4x4View, XMMatrixLookAtLH(lightPosition, lookAt, up));
-    m_pLightCamera->SetViewMatrix(xmf4x4View);
-    m_pLightCamera->UpdateShaderVariables(pd3dCommandList);
+	m_pLightCamera->SetViewMatrix(xmf4x4View);
+	m_pLightCamera->UpdateShaderVariables(pd3dCommandList);
 
-    // 6. 지형 렌더링 (그림자 패스 전용 PSO 사용)
-    if (m_pTerrain && m_pTerrainShader)
-    {
-        // 지형은 테셀레이션을 사용하므로, CTerrainShader에 있는 그림자 전용 PSO(인덱스 3)를 사용해야 합니다.
-        pd3dCommandList->SetPipelineState(m_pTerrainShader->GetPipelineState(3));
+	// 6. 지형 렌더링 (그림자 패스 전용 PSO 사용)
+	if (m_pTerrain && m_pTerrainShader)
+	{
+		// 지형은 테셀레이션을 사용하므로, CTerrainShader에 있는 그림자 전용 PSO(인덱스 3)를 사용해야 합니다.
+		pd3dCommandList->SetPipelineState(m_pTerrainShader->GetPipelineState(3));
 
 		m_pTerrain->UpdateShaderVariable(pd3dCommandList, &m_pTerrain->m_xmf4x4World);
 		for (int i = 0; i < m_pTerrain->m_nMeshes; i++)
-			if(m_pTerrain->m_ppMeshes[i]) m_pTerrain->m_ppMeshes[i]->Render(pd3dCommandList, 0); // 메시는 PSO 변경 없이 드로우 콜만
-    }
+			if (m_pTerrain->m_ppMeshes[i]) m_pTerrain->m_ppMeshes[i]->Render(pd3dCommandList, 0); // 메시는 PSO 변경 없이 드로우 콜만
+	}
 
-                    // 7. 기타 오브젝트 렌더링 (일반 그림자 셰이더 PSO 사용)
+	// 7. 기타 오브젝트 렌더링 (일반 그림자 셰이더 PSO 사용)
 
-                    CShadowShader* pShadowShader = dynamic_cast<CShadowShader*>(m_ppShaders[5]);
+	CShadowShader* pShadowShader = dynamic_cast<CShadowShader*>(m_ppShaders[5]);
 
-                    if (!pShadowShader) return;
+	if (!pShadowShader) return;
 
-                    pd3dCommandList->SetPipelineState(pShadowShader->GetPipelineState(0));
+	pd3dCommandList->SetPipelineState(pShadowShader->GetPipelineState(0));
 
-                
 
-                    // 플레이어 렌더링
 
-                    if (m_pPlayer)
+	// 플레이어 렌더링
 
-                    {
+	if (m_pPlayer)
 
-                		m_pPlayer->RenderShadow(pd3dCommandList);
+	{
 
-                    }
+		m_pPlayer->RenderShadow(pd3dCommandList);
 
-                    // 빌딩 렌더링
+	}
 
-                    if (m_pBuildingObject)
+	// 빌딩 렌더링
 
-                    {
+	if (m_pBuildingObject)
 
-                		m_pBuildingObject->RenderShadow(pd3dCommandList);
+	{
 
-                    }
+		m_pBuildingObject->RenderShadow(pd3dCommandList);
 
-                    // 기타 오브젝트(헬리콥터 등) 렌더링
+	}
 
-                    CObjectsShader* pObjectsShader = dynamic_cast<CObjectsShader*>(m_ppShaders[0]);
+	// 기타 오브젝트(헬리콥터 등) 렌더링
 
-                	if (pObjectsShader)
+	CObjectsShader* pObjectsShader = dynamic_cast<CObjectsShader*>(m_ppShaders[0]);
 
-                	{
+	if (pObjectsShader)
 
-                		for (int i = 0; i < pObjectsShader->GetNumberOfObjects(); i++)
+	{
 
-                		{
+		for (int i = 0; i < pObjectsShader->GetNumberOfObjects(); i++)
 
-                			CGameObject *pObject = pObjectsShader->GetObject(i);
+		{
 
-                			if (pObject && pObject->m_bRender)
+			CGameObject* pObject = pObjectsShader->GetObject(i);
 
-                			{
-								pObject->Animate(0.0f, NULL);
-								pObject->UpdateTransform(NULL);
-                				pObject->RenderShadow(pd3dCommandList);
+			if (pObject && pObject->m_bRender)
 
-                			}
+			{
+				pObject->Animate(0.0f, NULL);
+				pObject->UpdateTransform(NULL);
+				pObject->RenderShadow(pd3dCommandList);
 
-                		}
+			}
 
-                	}
+		}
+
+	}
+}
+
+void CScene::RenderSpotlightShadowMap(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* pMainCamera)
+{
+	// 1. 뷰포트 및 시저 사각형 설정
+	pd3dCommandList->RSSetViewports(1, &m_d3dSpotlightShadowViewport);
+	pd3dCommandList->RSSetScissorRects(1, &m_d3dSpotlightShadowScissorRect);
+
+	// 2. DSV 초기화
+	pd3dCommandList->ClearDepthStencilView(m_d3dSpotlightShadowDsvCpuHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, NULL);
+
+	// 3. 렌더 타겟 설정
+	pd3dCommandList->OMSetRenderTargets(0, NULL, FALSE, &m_d3dSpotlightShadowDsvCpuHandle);
+
+	// 4. 전역 루트 시그니처 및 디스크립터 힙 설정
+	pd3dCommandList->SetGraphicsRootSignature(m_pd3dGraphicsRootSignature);
+	ID3D12DescriptorHeap* ppHeaps[] = { m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap };
+	pd3dCommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+
+	// 5. 스포트라이트 카메라 업데이트 (m_pLights[1] 기반)
+	XMVECTOR lightPosition = XMLoadFloat3(&m_pLights[1].m_xmf3Position);
+	XMVECTOR lightDirection = XMLoadFloat3(&m_pLights[1].m_xmf3Direction);
+	XMVECTOR lookAt = lightPosition + lightDirection;
+	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	XMFLOAT4X4 xmf4x4View;
+	XMStoreFloat4x4(&xmf4x4View, XMMatrixLookAtLH(lightPosition, lookAt, up));
+	m_pSpotlightCamera->SetViewMatrix(xmf4x4View);
+	m_pSpotlightCamera->UpdateShaderVariables(pd3dCommandList);
+
+	// 6. 지형 렌더링 (그림자 패스 전용 PSO 사용)
+	if (m_pTerrain && m_pTerrainShader)
+	{
+		pd3dCommandList->SetPipelineState(m_pTerrainShader->GetPipelineState(3));
+		m_pTerrain->UpdateShaderVariable(pd3dCommandList, &m_pTerrain->m_xmf4x4World);
+		for (int i = 0; i < m_pTerrain->m_nMeshes; i++)
+			if (m_pTerrain->m_ppMeshes[i]) m_pTerrain->m_ppMeshes[i]->Render(pd3dCommandList, 0);
+	}
+
+	// 7. 기타 오브젝트 렌더링 (일반 그림자 셰이더 PSO 사용)
+	CShadowShader* pShadowShader = dynamic_cast<CShadowShader*>(m_ppShaders[5]);
+	if (!pShadowShader) return;
+	pd3dCommandList->SetPipelineState(pShadowShader->GetPipelineState(0));
+/*
+	if (m_pPlayer)
+	{
+		m_pPlayer->RenderShadow(pd3dCommandList);
+	}
+*/
+	if (m_pBuildingObject)
+	{
+		m_pBuildingObject->RenderShadow(pd3dCommandList);
+	}
+	CObjectsShader* pObjectsShader = dynamic_cast<CObjectsShader*>(m_ppShaders[0]);
+	if (pObjectsShader)
+	{
+		for (int i = 0; i < pObjectsShader->GetNumberOfObjects(); i++)
+		{
+			CGameObject* pObject = pObjectsShader->GetObject(i);
+			if (pObject && pObject->m_bRender)
+			{
+				pObject->Animate(0.0f, NULL);
+				pObject->UpdateTransform(NULL);
+				pObject->RenderShadow(pd3dCommandList);
+			}
+		}
+	}
 }
 
 

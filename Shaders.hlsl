@@ -8,12 +8,19 @@ struct MATERIAL
 
 // Shadow Map Resources
 Texture2D<float>          gShadowMap          : register(t31);
+Texture2D<float>          gSpotlightShadowMap : register(t32);
 SamplerComparisonState    gssShadow           : register(s2);
 
 cbuffer cbShadow          : register(b9)
 {
     matrix                  gmtxShadowTransform; // World -> Light Clip space -> Texture space
     float                   gShadowBias;
+};
+
+cbuffer cbSpotlightShadow : register(b10)
+{
+	matrix                  gmtxSpotlightShadowTransform;
+	float                   gSpotlightShadowBias;
 };
 
 cbuffer cbCameraInfo : register(b1)
@@ -87,14 +94,17 @@ Texture2D gtxtWaterDetail1Texture : register(t8);
 SamplerState gssWrap : register(s0);
 SamplerState gssClamp : register(s1);
 
-// Shadow calculation function
-float CalcPcfShadow(float4 positionW)
+// Generic shadow calculation function with PCF
+float CalcShadowFactor(float4 positionW, Texture2D<float> shadowMap, matrix shadowTransform, float shadowBias)
 {
-    float4 shadowPos = mul(positionW, gmtxShadowTransform);
+    float4 shadowPos = mul(positionW, shadowTransform);
+
+	// Prevent incorrect projection for pixels behind the light
+	if (shadowPos.w <= 0.0f) return 1.0f;
+
     shadowPos /= shadowPos.w;
 
     // Point 1: Shadow Coordinate Range Check
-    // If the pixel is outside the light's frustum, it's not shadowed.
     if (shadowPos.x < 0.0f || shadowPos.x > 1.0f ||
         shadowPos.y < 0.0f || shadowPos.y > 1.0f ||
         shadowPos.z < 0.0f || shadowPos.z > 1.0f)
@@ -102,21 +112,32 @@ float CalcPcfShadow(float4 positionW)
         return 1.0f; // No shadow
     }
 
-    // Point 3: Dynamic Texel Size Calculation
 	uint width, height;
-	gShadowMap.GetDimensions(width, height);
+	shadowMap.GetDimensions(width, height);
 	float2 texel = 1.0f / float2(width, height);
-    float  z     = shadowPos.z - gShadowBias;
+    float  z     = shadowPos.z - shadowBias;
 
     float s = 0.0f;
     [unroll] for(int y=-1; y<=1; y++)
     {
         [unroll] for(int x=-1; x<=1; x++)
         {
-            s += gShadowMap.SampleCmpLevelZero(gssShadow, shadowPos.xy + float2(x,y)*texel, z);
+            s += shadowMap.SampleCmpLevelZero(gssShadow, shadowPos.xy + float2(x,y)*texel, z);
         }
     }
     return s / 9.0f;
+}
+
+// Wrapper for Directional Light Shadow
+float CalcDirectionalPcfShadow(float4 positionW)
+{
+	return CalcShadowFactor(positionW, gShadowMap, gmtxShadowTransform, gShadowBias);
+}
+
+// Wrapper for Spotlight Shadow
+float CalcSpotlightPcfShadow(float4 positionW)
+{
+	return CalcShadowFactor(positionW, gSpotlightShadowMap, gmtxSpotlightShadowTransform, gSpotlightShadowBias);
 }
 
 VS_WATER_OUTPUT VSTerrainWater(VS_WATER_INPUT input)
@@ -225,8 +246,22 @@ float4 PSStandard(VS_STANDARD_OUTPUT input) : SV_TARGET
     // Calculate full illumination
     float4 cIllumination = Lighting(input.positionW, normalW);
 
-    // Calculate shadow factor
-    float shadowFactor = CalcPcfShadow(float4(input.positionW, 1.0f));
+    // Calculate shadow factors for both lights
+    float shadowFactorDir = CalcDirectionalPcfShadow(float4(input.positionW, 1.0f));
+	float shadowFactorSpot = 1.0f;
+
+	// Apply spotlight shadow only for pixels inside the spotlight cone.
+	// This prevents darkening areas that are not lit by the spotlight.
+	if (gLights[1].m_bEnable)
+	{
+		float3 vToLight = normalize(gLights[1].m_vPosition - input.positionW);
+		float fCosAngle = dot(normalize(-gLights[1].m_vDirection), vToLight);
+		if (fCosAngle > gLights[1].m_fPhi)
+		{
+			shadowFactorSpot = CalcSpotlightPcfShadow(float4(input.positionW, 1.0f));
+		}
+	}
+	float shadowFactor = shadowFactorDir * shadowFactorSpot;
     
     // Apply shadow factor by lerping between ambient light and full illumination.
     // This is a simple and effective way to apply shadow without complex refactoring.
@@ -467,7 +502,19 @@ float4 PSTerrain(DS_TERRAIN_OUTPUT input) : SV_TARGET
     float4 albedo = cBaseTexColor * 0.7f + cDetailTexColor * 0.3f;
 
     // (추가) 그림자 계수
-    float shadow = CalcPcfShadow(float4(input.posW, 1.0f));
+    float shadowDir = CalcDirectionalPcfShadow(float4(input.posW, 1.0f));
+	float shadowSpot = 1.0f;
+	
+	if (gLights[1].m_bEnable)
+	{
+		float3 vToLight = normalize(gLights[1].m_vPosition - input.posW);
+		float fCosAngle = dot(normalize(-gLights[1].m_vDirection), vToLight);
+		if (fCosAngle > gLights[1].m_fPhi)
+		{
+			shadowSpot = CalcSpotlightPcfShadow(float4(input.posW, 1.0f));
+		}
+	}
+	float shadow = shadowDir * shadowSpot;
 
     // (추가) 지형은 조명이 약하니까 “완전 검정” 말고 ambient를 남겨주는 게 보기 좋음
     float3 ambient = albedo.rgb * 0.05f; // Use a much darker ambient for higher contrast
